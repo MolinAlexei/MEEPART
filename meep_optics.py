@@ -1,20 +1,23 @@
 import meep as mp
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as cl
 import h5py
 import os
 import glob
 
 class OpticalSystem(object):
     """
-    This class is used to define the optical system, by creating the dielectric map
-    associated to the system that can the be used within the simulation class.
+    This class is used to define the optical system, by creating the dielectric
+    map associated to the system that can the be used within the simulation 
+    class.
     """
     
     def __init__(self, name=''):
         
         """
-        Give a name to the optical system and initialise a geometry that is empty by default
+        Give a name to the optical system and initialise a geometry that is 
+        empty by default
         """
         
         self.name = name
@@ -56,26 +59,54 @@ class OpticalSystem(object):
             out_str += ' {}'.format(component.name)
         return out_str
     
-    def create_permittivity_map(self, resolution = 1, dpml = None):
+    def assemble_system(self, resolution = 1, dpml = None):
+        
         """
         Creates the map that will be read by the simulation later, as well as
-        the geometry object necessary for an absorbing aperture stop
+        the geometry object necessary for an absorbing aperture stop and an 
+        image plane
+        
+        Inputs : 
+            - resolution : defines how many points/unit of distance, a higher 
+            res gives better precision but also longer coomputation
+            - dpml : thickness of the outer absorbing layer
         """
+        
         self.resolution = resolution
         self.dpml = dpml
         
-        epsilon_map = np.ones(((self.size_x + 2*dpml)*resolution+1, (self.size_y + 2*dpml)*resolution+1)) 
+        # Define the map size, so that the PML is outside of the working system
+        epsilon_map = np.ones(((self.size_x + 2*dpml)*resolution+1, 
+                               (self.size_y + 2*dpml)*resolution+1)) 
+        
+        # The y axis has its zero in the middle of the cell, the offset
+        # is mid_y
         mid_y = np.int(self.size_y*resolution/2)
-    
+        
+        #Goes through all the components to add them to the system
         for component in self.components:
             
-            thick = component.thick*resolution
+            #The action is decided with the component type
             
+            ### LENSES
             if component.object_type == 'Lens':
+                
+                # The lens equation returns a sag (distance from plane orth. to
+                # optical axis) as a function of distance from optical axis y,
+                # so the code cycles through the different y to change the 
+                # dielectric map between left surface and right surface
+                
                 for y_res in range(mid_y) :
                 
-                    x_left = np.int(np.around((component.left_surface(y_res/resolution) + component.x)*resolution)) 
-                    x_right = np.int(np.around((component.right_surface(y_res/resolution) + component.x)*resolution + thick))
+                    thick = component.thick*resolution
+                    x_left = np.int(np.around((
+                        component.left_surface(y_res/resolution) + 
+                        component.x)*resolution))
+                    
+                    x_right = np.int(np.around((
+                        component.right_surface(y_res/resolution) + 
+                        component.x)*resolution + 
+                        thick))
                     
                     epsilon_map[x_left:x_right++1, dpml*resolution + mid_y-y_res] *= component.material
                     
@@ -91,7 +122,8 @@ class OpticalSystem(object):
                         epsilon_map[x_right + 1: component.AR_right + x_right + 1, dpml*resolution + mid_y - y_res] *= component.AR_material
                         if y_res != 0 :
                             epsilon_map[x_right + 1: component.AR_right + x_right + 1, dpml*resolution + mid_y+y_res] *= component.AR_material
-                                
+            
+            ### APERTURE STOP
             elif component.object_type == 'AP_stop':
                 
                 c1 = mp.Block(size=mp.Vector3(component.thick, (self.size_y - component.diameter)/2 + dpml, 0),
@@ -110,12 +142,14 @@ class OpticalSystem(object):
                 else :
                     self.geometry = [c1,c2]
             
+            ### IMAGE PLANE
             elif component.object_type == 'ImagePlane':
                 
                 c1 = mp.Block(size=mp.Vector3(component.thick, component.diameter, 0),
                       center=mp.Vector3(component.x - self.size_x/2, 0, 0),
                       material = component.material)
                 
+                self.image_plane_pos = component.x - self.size_x/2
                 if self.geometry is not None :
                     self.geometry.append(c1)
                     
@@ -215,7 +249,7 @@ class Sim(object):
     def define_source(self, frequency, 
                sourcetype = 'Plane wave', 
                x = 0, y = 0, 
-               size_x = 0, size_y = 310, 
+               size_x = 0, size_y = 300, 
                beam_width = 0, 
                focus_pt_x = 0, focus_pt_y = 0):
         
@@ -238,9 +272,11 @@ class Sim(object):
                       beam_w0 = beam_width,
                       beam_E0 = mp.Vector3(0,0,1),
                       size=mp.Vector3(size_x, size_y, 0))]
+        
+        return self.source
     
     
-    def run_sim(self, runtime = 0., dpml = None):
+    def run_sim(self, runtime = 0., dpml = None, sim_resolution = 1):
         
         dpml = self.opt_sys.dpml
         
@@ -249,7 +285,7 @@ class Sim(object):
         
         self.PML(dpml)
         self.dpml = dpml
-        self.sim_resolution = 1
+        self.sim_resolution = sim_resolution
 
         
         self.sim = mp.Simulation(cell_size=self.cell,
@@ -292,14 +328,70 @@ class Sim(object):
         plt.figure()
         for k in range(np.int(1/self.frequency*0.5)):
             self.sim.run(until = 1)
-            ez_data = self.sim.get_array(center=mp.Vector3(self.opt_sys.size_x/2, 0), size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)
+            ez_data = self.sim.get_array(center=mp.Vector3(self.opt_sys.image_plane_pos-1, 0), 
+                                         size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)
             plt.scatter(np.arange(len(ez_data)), ez_data**2, marker = '+')
         plt.title('$E^2$ at image plane')
         plt.xlabel('y times resolution')
         plt.ylabel('$E^2$')
         plt.show()
     
+    def plot_beam(self, single_plot = True, beam_height = 0., max_height = 0. ):
+        
+        if single_plot :
+            plt.figure()
+            
+        timestep = .5
+        n_iter = np.int(1/(2*self.frequency*timestep)) 
+        
+        ez_data = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2, 0), 
+                                         size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)**2
+        for k in range(n_iter):
+            self.sim.run(until = timestep)
+            ez_data += self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2, 0), 
+                                         size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)**2
+        
+        E_mean = ez_data/(n_iter+1)
+        plt.scatter(np.arange(len(ez_data)), 
+                    E_mean, 
+                    marker = '+', 
+                    c = beam_height*np.ones(len(E_mean)), 
+                    cmap = 'plasma', 
+                    norm = cl.Normalize(vmin = 0, vmax = max_height),
+                    alpha = .9) 
+        plt.title('Average $E^2$ in front of aperture')
+        plt.xlabel('y times resolution')
+        plt.ylabel('$E^2$')
     
+        if single_plot :
+            plt.show()
+    
+class Analysis(object):
+    
+    def __init__(self, sim):
+        self.sim = sim
+        
+    def image_plane_beams(self, frequency, sourcetype = 'Gaussian beam', y_max = 0., Nb_sources = 1.):
+        
+        plt.figure()
+        for k in range(Nb_sources):
+            height = y_max*k/(Nb_sources-1)
+            self.sim.define_source(frequency, 
+                                   sourcetype = sourcetype,
+                                   x=712.704, y = height, 
+                                   size_x = 0, size_y = 300, 
+                                   beam_width = 10, 
+                                   focus_pt_x = 0, focus_pt_y = 0)
+            
+            self.sim.run_sim(runtime = 1000, sim_resolution = 4)
+            self.sim.plot_beam(single_plot = False, beam_height = height, max_height = y_max)
+        
+        plt.colorbar(label = 'Beam distance from optical axis')
+        plt.show()
+            
+        
+
+
 if __name__ == '__main__':
     
     opt_sys = OpticalSystem('test')
@@ -323,7 +415,7 @@ if __name__ == '__main__':
                          thick = 40, 
                          x = 40.+130.+369.408, 
                          y = 0.)
-                         #AR_left = 5, AR_right = 5)
+                         #AR_left = 1, AR_right = 5)
     
     aperture_stop = ApertureStop(name = 'Aperture Stop',
                                  pos_x = 25,
@@ -345,16 +437,20 @@ if __name__ == '__main__':
     opt_sys.add_component(image_plane)
     print(opt_sys.list_components())
     
-    study_freq = 0.05
+    study_freq = 0.25
     dpml = dpml = np.int(np.around(0.5*1/study_freq))
     
-    opt_sys.create_permittivity_map(dpml = dpml)
+    opt_sys.assemble_system(dpml = dpml, resolution = 4)
     #opt_sys.plot_lenses()
     opt_sys.write_h5file()
     
     sim = Sim(opt_sys)
-    sim.define_source(study_freq, sourcetype = 'Plane wave', x=0, y= 0)#, beam_width = 10, focus_pt_x= 0, focus_pt_y=10)
-    sim.run_sim(runtime = 1000)
+    # sim.define_source(study_freq, sourcetype = 'Gaussian beam', x=712.704, y= 0, beam_width = 5, focus_pt_x= 0, focus_pt_y=0)
+    # sim.run_sim(runtime = 1000, sim_resolution = 1)
     #sim.plot_system()
-    sim.plot_efield()
+    #sim.plot_efield()
     #sim.plot_airy_spot()
+    # sim.plot_beam()
+    
+    analysis = Analysis(sim)
+    analysis.image_plane_beams(study_freq, y_max = 100, Nb_sources = 4)
