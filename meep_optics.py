@@ -59,6 +59,60 @@ class OpticalSystem(object):
             out_str += ' {}'.format(component.name)
         return out_str
     
+    def write_lens(self, component, epsilon_map, resolution):
+        # The lens equation returns a sag (distance from plane orth. to
+        # optical axis) as a function of distance from optical axis y,
+        # so the code cycles through the different y to change the 
+        # dielectric map between left surface and right surface
+        
+        # The y axis has its zero in the middle of the cell, the offset
+        # is mid_y
+        mid_y = np.int(self.size_y*resolution/2)
+        
+        for y_res in range(mid_y) :
+        
+            thick = component.thick*resolution
+            
+            #Left surface sag
+            x_left = np.int(np.around((
+                        component.left_surface(y_res/resolution) + 
+                        component.x)*resolution))
+            #Right surface sag       
+            x_right = np.int(np.around((
+                        component.right_surface(y_res/resolution) + 
+                        component.x)*resolution + 
+                        thick))
+            
+            #Above and below the optical axis :
+            y_positive = dpml*resolution + mid_y + y_res
+            y_negative = dpml*resolution + mid_y - y_res
+            
+            #Write lens between left and right surface below optical axis
+            epsilon_map[x_left:x_right+1, y_negative] *= component.material
+            
+            #So that the center line is not affectef twice :
+            if y_res != 0 :
+                #Write lens between left and right surface above optical axis
+                epsilon_map[x_left:x_right+1, y_positive] *= component.material
+            
+            #Write AR coating on left surface
+            if component.AR_left is not None :
+                
+                epsilon_map[x_left - component.AR_left : x_left, 
+                            y_negative] *= component.AR_material
+                
+                if y_res != 0 :
+                    epsilon_map[x_left - component.AR_left : x_left, 
+                                y_positive] *= component.AR_material
+            
+            #Write AR coating on right surface                    
+            if component.AR_right is not None :
+                epsilon_map[x_right + 1: component.AR_right + x_right + 1, 
+                            y_negative] *= component.AR_material
+                if y_res != 0 :
+                    epsilon_map[x_right + 1: component.AR_right + x_right + 1, 
+                                y_positive] *= component.AR_material
+    
     def assemble_system(self, resolution = 1, dpml = None):
         
         """
@@ -79,10 +133,7 @@ class OpticalSystem(object):
         epsilon_map = np.ones(((self.size_x + 2*dpml)*resolution+1, 
                                (self.size_y + 2*dpml)*resolution+1)) 
         
-        # The y axis has its zero in the middle of the cell, the offset
-        # is mid_y
-        mid_y = np.int(self.size_y*resolution/2)
-        
+                
         #Goes through all the components to add them to the system
         for component in self.components:
             
@@ -91,38 +142,8 @@ class OpticalSystem(object):
             ### LENSES
             if component.object_type == 'Lens':
                 
-                # The lens equation returns a sag (distance from plane orth. to
-                # optical axis) as a function of distance from optical axis y,
-                # so the code cycles through the different y to change the 
-                # dielectric map between left surface and right surface
-                
-                for y_res in range(mid_y) :
-                
-                    thick = component.thick*resolution
-                    x_left = np.int(np.around((
-                        component.left_surface(y_res/resolution) + 
-                        component.x)*resolution))
-                    
-                    x_right = np.int(np.around((
-                        component.right_surface(y_res/resolution) + 
-                        component.x)*resolution + 
-                        thick))
-                    
-                    epsilon_map[x_left:x_right++1, dpml*resolution + mid_y-y_res] *= component.material
-                    
-                    if y_res != 0 :
-                        epsilon_map[x_left:x_right+1, dpml*resolution + mid_y+y_res] *= component.material
-                        
-                    if component.AR_left is not None :
-                        epsilon_map[x_left - component.AR_left : x_left, dpml*resolution + mid_y - y_res] *= component.AR_material
-                        if y_res != 0 :
-                            epsilon_map[x_left - component.AR_left : x_left, dpml*resolution + mid_y + y_res] *= component.AR_material
-                                
-                    if component.AR_right is not None :
-                        epsilon_map[x_right + 1: component.AR_right + x_right + 1, dpml*resolution + mid_y - y_res] *= component.AR_material
-                        if y_res != 0 :
-                            epsilon_map[x_right + 1: component.AR_right + x_right + 1, dpml*resolution + mid_y+y_res] *= component.AR_material
-            
+                self.write_lens(component, epsilon_map, resolution)
+     
             ### APERTURE STOP
             elif component.object_type == 'AP_stop':
                 
@@ -266,7 +287,7 @@ class Sim(object):
         elif sourcetype == 'Gaussian beam':
             self.source = [mp.GaussianBeamSource(mp.ContinuousSource(frequency),
                       component = mp.Ez,
-                      center = mp.Vector3(x_meep, y_meep, 0),
+                      center = mp.Vector3(self.opt_sys.image_plane_pos-1, y_meep, 0),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y),
                       beam_kdir = mp.Vector3(-1, 0),
                       beam_w0 = beam_width,
@@ -336,7 +357,7 @@ class Sim(object):
         plt.ylabel('$E^2$')
         plt.show()
     
-    def plot_beam(self, single_plot = True, beam_height = 0., max_height = 0. ):
+    def plot_beam(self, single_plot = True, colors = ['r'], plot_n = 0, beam_height = 0.):
         
         if single_plot :
             plt.figure()
@@ -352,15 +373,13 @@ class Sim(object):
                                          size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)**2
         
         E_mean = ez_data/(n_iter+1)
-        plt.scatter(np.arange(len(ez_data)), 
+        plt.plot(np.arange(len(ez_data))/self.sim_resolution, 
                     E_mean, 
-                    marker = '+', 
-                    c = beam_height*np.ones(len(E_mean)), 
-                    cmap = 'plasma', 
-                    norm = cl.Normalize(vmin = 0, vmax = max_height),
-                    alpha = .9) 
+                    color = colors[plot_n],
+                    alpha = .9,
+                    label = '{:d} mm'.format(int(beam_height))) 
         plt.title('Average $E^2$ in front of aperture')
-        plt.xlabel('y times resolution')
+        plt.xlabel('y (mm)')
         plt.ylabel('$E^2$')
     
         if single_plot :
@@ -371,9 +390,10 @@ class Analysis(object):
     def __init__(self, sim):
         self.sim = sim
         
-    def image_plane_beams(self, frequency, sourcetype = 'Gaussian beam', y_max = 0., Nb_sources = 1.):
+    def image_plane_beams(self, frequency, sourcetype = 'Gaussian beam', y_max = 0., Nb_sources = 1., sim_resolution = 1):
         
         plt.figure()
+        colors = plt.cm.viridis(np.linspace(0, 1, Nb_sources))
         for k in range(Nb_sources):
             height = y_max*k/(Nb_sources-1)
             self.sim.define_source(frequency, 
@@ -383,10 +403,10 @@ class Analysis(object):
                                    beam_width = 10, 
                                    focus_pt_x = 0, focus_pt_y = 0)
             
-            self.sim.run_sim(runtime = 1000, sim_resolution = 4)
-            self.sim.plot_beam(single_plot = False, beam_height = height, max_height = y_max)
+            self.sim.run_sim(runtime = 1000, sim_resolution = sim_resolution)
+            self.sim.plot_beam(single_plot = False, colors= colors, plot_n = k, beam_height = height)
         
-        plt.colorbar(label = 'Beam distance from optical axis')
+        plt.legend(fontsize = 9)        
         plt.show()
             
         
@@ -395,7 +415,7 @@ class Analysis(object):
 if __name__ == '__main__':
     
     opt_sys = OpticalSystem('test')
-    opt_sys.set_size(715,300)
+    opt_sys.set_size(800,300)
     
     lens1 = AsphericLens(name = 'Lens 1', 
                          r1 = 327.365, 
@@ -403,7 +423,7 @@ if __name__ == '__main__':
                          c1 = -0.66067, 
                          c2 = 0, 
                          thick = 40, 
-                         x = 130., 
+                         x = 130.+50., 
                          y = 0.) 
                          #AR_left = 5, AR_right = 5)
     
@@ -413,19 +433,19 @@ if __name__ == '__main__':
                          c1 = -2.4029, 
                          c2 = 1770.36, 
                          thick = 40, 
-                         x = 40.+130.+369.408, 
+                         x = 40.+130.+369.408+50., 
                          y = 0.)
                          #AR_left = 1, AR_right = 5)
     
     aperture_stop = ApertureStop(name = 'Aperture Stop',
-                                 pos_x = 25,
+                                 pos_x = 50,
                                  diameter = 200,
                                  thickness = 5,
                                  index = 5., 
                                  conductivity = 1e7)
     
     image_plane = ImagePlane(name = 'Image Plane',
-                             pos_x = 710,
+                             pos_x = 50+714.704,
                              diameter = 300,
                              thickness = 2,
                              index = 5., 
@@ -437,20 +457,20 @@ if __name__ == '__main__':
     opt_sys.add_component(image_plane)
     print(opt_sys.list_components())
     
-    study_freq = 0.25
+    study_freq = 0.05
     dpml = dpml = np.int(np.around(0.5*1/study_freq))
     
-    opt_sys.assemble_system(dpml = dpml, resolution = 4)
+    opt_sys.assemble_system(dpml = dpml, resolution = 1)
     #opt_sys.plot_lenses()
     opt_sys.write_h5file()
     
     sim = Sim(opt_sys)
-    # sim.define_source(study_freq, sourcetype = 'Gaussian beam', x=712.704, y= 0, beam_width = 5, focus_pt_x= 0, focus_pt_y=0)
-    # sim.run_sim(runtime = 1000, sim_resolution = 1)
-    #sim.plot_system()
-    #sim.plot_efield()
+    sim.define_source(study_freq, sourcetype = 'Gaussian beam', x=712.704, y= 0, beam_width = 5, focus_pt_x= 0, focus_pt_y=0)
+    sim.run_sim(runtime = 1000, sim_resolution = 1)
+    sim.plot_system()
+    sim.plot_efield()
     #sim.plot_airy_spot()
     # sim.plot_beam()
     
-    analysis = Analysis(sim)
-    analysis.image_plane_beams(study_freq, y_max = 100, Nb_sources = 4)
+    # analysis = Analysis(sim)
+    # analysis.image_plane_beams(study_freq, y_max = 100, Nb_sources = 10)
