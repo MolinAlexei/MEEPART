@@ -95,23 +95,27 @@ class OpticalSystem(object):
                 #Write lens between left and right surface above optical axis
                 epsilon_map[x_left:x_right+1, y_positive] *= component.material
             
+            delam = component.delaminate
             #Write AR coating on left surface
             if component.AR_left is not None :
                 
-                epsilon_map[x_left - component.AR_left : x_left, 
+                epsilon_map[x_left - component.AR_left - delam: x_left - delam, 
                             y_negative] *= component.AR_material
                 
                 if y_res != 0 :
-                    epsilon_map[x_left - component.AR_left : x_left, 
+                    epsilon_map[x_left - component.AR_left - delam: x_left - delam, 
                                 y_positive] *= component.AR_material
             
             #Write AR coating on right surface                    
             if component.AR_right is not None :
-                epsilon_map[x_right + 1: component.AR_right + x_right + 1, 
+                epsilon_map[x_right + 1 + delam: component.AR_right + x_right + 1 + delam, 
                             y_negative] *= component.AR_material
+                
                 if y_res != 0 :
-                    epsilon_map[x_right + 1: component.AR_right + x_right + 1, 
+                    epsilon_map[x_right + 1 + delam: component.AR_right + x_right + 1 + delam, 
                                 y_positive] *= component.AR_material
+            
+            
     
     def assemble_system(self, resolution = 1, dpml = None):
         
@@ -147,13 +151,23 @@ class OpticalSystem(object):
             ### APERTURE STOP
             elif component.object_type == 'AP_stop':
                 
-                c1 = mp.Block(size=mp.Vector3(component.thick, (self.size_y - component.diameter)/2 + dpml, 0),
-                      center=mp.Vector3(component.x - self.size_x/2, (component.diameter +  self.size_y + 2*dpml)/4, 0),
-                      material = mp.Medium(epsilon=component.permittivity, D_conductivity = component.conductivity))
+                c1 = mp.Block(size=mp.Vector3(component.thick, 
+                                              (self.size_y - component.diameter)/2 + dpml, 0),
+                              
+                      center=mp.Vector3(component.x - self.size_x/2, 
+                                        (component.diameter +  self.size_y + 2*dpml)/4, 0),
+                      
+                      material = mp.Medium(epsilon=component.permittivity, 
+                                           D_conductivity = component.conductivity))
                 
-                c2 = mp.Block(size=mp.Vector3(component.thick, (self.size_y - component.diameter)/2 + dpml, 0),
-                      center=mp.Vector3(component.x - self.size_x/2, -(component.diameter + self.size_y + 2*dpml)/4, 0),
-                      material = mp.Medium(epsilon=component.permittivity, D_conductivity = component.conductivity))
+                c2 = mp.Block(size=mp.Vector3(component.thick, 
+                                              (self.size_y - component.diameter)/2 + dpml, 0),
+                              
+                      center=mp.Vector3(component.x - self.size_x/2, 
+                                        -(component.diameter + self.size_y + 2*dpml)/4, 0),
+                      
+                      material = mp.Medium(epsilon=component.permittivity, 
+                                           D_conductivity = component.conductivity))
         
                 
                 if self.geometry is not None :
@@ -200,7 +214,9 @@ class AsphericLens(object):
                  thick=None, 
                  x=0., y=0., 
                  index = 1.52, 
-                 AR_left = None, AR_right = None):
+                 AR_left = None, AR_right = None,
+                 AR_delamination = 0):
+        
         self.name = name
         self.r1 = r1
         self.r2 = r2
@@ -214,6 +230,7 @@ class AsphericLens(object):
         self.AR_left = AR_left
         self.AR_right = AR_right
         self.AR_material = index
+        self.delaminate = np.int(AR_delamination)
     
     def left_surface(self, y):
         if self.r1 != np.inf :
@@ -230,7 +247,13 @@ class AsphericLens(object):
     
 class ApertureStop(object):
 
-    def __init__(self, name = '', diameter = None, pos_x = None, thickness = None, index  = None, conductivity = None):
+    def __init__(self, name = '', 
+                 diameter = None, 
+                 pos_x = None, 
+                 thickness = None, 
+                 index  = None, 
+                 conductivity = None):
+        
         self.name = name
         self.thick = thickness
         self.x = pos_x
@@ -241,13 +264,20 @@ class ApertureStop(object):
 
 class ImagePlane(object):
 
-    def __init__(self, name = '', diameter = None, pos_x = None, thickness = None, index  = None, conductivity = None):
+    def __init__(self, name = '', 
+                 diameter = None, 
+                 pos_x = None, 
+                 thickness = None, 
+                 index  = None, 
+                 conductivity = None):
+        
         self.name = name
         self.thick = thickness
         self.x = pos_x
         self.diameter = diameter
         if conductivity != np.inf :
-            self.material = mp.Medium(epsilon=index**2, D_conductivity = conductivity)
+            self.material = mp.Medium(epsilon=index**2, 
+                                      D_conductivity = conductivity)
         
         else :
             self.material = mp.perfect_electric_conductor
@@ -424,8 +454,9 @@ if __name__ == '__main__':
                          c2 = 0, 
                          thick = 40, 
                          x = 130.+50., 
-                         y = 0.) 
-                         #AR_left = 5, AR_right = 5)
+                         y = 0., 
+                         AR_left = 5, AR_right = 5,
+                         AR_delamination = 0)
     
     lens2 = AsphericLens(name = 'Lens 2', 
                          r1 = 269.190, 
@@ -434,8 +465,9 @@ if __name__ == '__main__':
                          c2 = 1770.36, 
                          thick = 40, 
                          x = 40.+130.+369.408+50., 
-                         y = 0.)
-                         #AR_left = 1, AR_right = 5)
+                         y = 0.,
+                         AR_left = 5, AR_right = 5,
+                         AR_delamination = 0)
     
     aperture_stop = ApertureStop(name = 'Aperture Stop',
                                  pos_x = 50,
@@ -461,16 +493,16 @@ if __name__ == '__main__':
     dpml = dpml = np.int(np.around(0.5*1/study_freq))
     
     opt_sys.assemble_system(dpml = dpml, resolution = 1)
-    #opt_sys.plot_lenses()
+    # opt_sys.plot_lenses()
     opt_sys.write_h5file()
     
     sim = Sim(opt_sys)
-    sim.define_source(study_freq, sourcetype = 'Gaussian beam', x=712.704, y= 0, beam_width = 5, focus_pt_x= 0, focus_pt_y=0)
-    sim.run_sim(runtime = 1000, sim_resolution = 1)
-    sim.plot_system()
-    sim.plot_efield()
+    # sim.define_source(study_freq, sourcetype = 'Gaussian beam', x=712.704, y= 0, beam_width = 5, focus_pt_x= 0, focus_pt_y=0)
+    # sim.run_sim(runtime = 1000, sim_resolution = 1)
+    # sim.plot_system()
+    # sim.plot_efield()
     #sim.plot_airy_spot()
     # sim.plot_beam()
     
-    # analysis = Analysis(sim)
-    # analysis.image_plane_beams(study_freq, y_max = 100, Nb_sources = 10)
+    analysis = Analysis(sim)
+    analysis.image_plane_beams(study_freq, y_max = 100, Nb_sources = 10)
