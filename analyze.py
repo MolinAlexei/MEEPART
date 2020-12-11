@@ -10,8 +10,8 @@ lens1 = AsphericLens(name = 'Lens 1',
                      thick = 40, 
                      x = 130.+50., 
                      y = 0., 
-                     AR_left = 5, AR_right = 5,
-                     AR_delamination = .14)
+                     AR_left = .5, AR_right = .5,
+                     AR_delamination = .15)
     
 lens2 = AsphericLens(name = 'Lens 2', 
                      r1 = 269.190, 
@@ -21,8 +21,8 @@ lens2 = AsphericLens(name = 'Lens 2',
                      thick = 40, 
                      x = 40.+130.+369.408+50., 
                      y = 0.,
-                     AR_left = 5, AR_right = 5,
-                     AR_delamination = .14)
+                     AR_left = .5, AR_right = .5,
+                     AR_delamination = .15)
     
 aperture_stop = ApertureStop(name = 'Aperture Stop',
                              pos_x = 50,
@@ -65,35 +65,55 @@ sim = Sim(opt_sys)
 analysis = Analysis(sim)
 plt.figure()
 analysis.image_plane_beams(study_freq, fwidth = 0.1, sourcetype='Gaussian beam multichromatic',
-                           y_max = 100, Nb_sources = 2, linestyle='-', sim_resolution=7)
+                           y_max = 0, Nb_sources = 1, linestyle='-', sim_resolution=7)
 beams_delam = analysis.list_beams
 freq, fft_delam = analysis.beam_FT()
 plt.legend(fontsize = 9)
 
-# lens1.delaminate = 0
-# lens2.delaminate = 0
-# opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane)   
-# sim = Sim(opt_sys)
-# analysis = Analysis(sim)
-# analysis.image_plane_beams(study_freq, fwidth = 0.1, sourcetype='Gaussian beam multichromatic',
-#                            y_max = 100, Nb_sources = 2, linestyle = '--', sim_resolution=7) 
-# beams_no_delam = analysis.list_beams
-# freq, fft_no_delam = analysis.beam_FT()
+
+
+lens1.delaminate = 0
+lens2.delaminate = 0
+opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane)   
+sim = Sim(opt_sys)
+analysis = Analysis(sim)
+analysis.image_plane_beams(study_freq, fwidth = 0.1, sourcetype='Gaussian beam multichromatic',
+                           y_max = 0, Nb_sources = 1, linestyle = '--', sim_resolution=7) 
+beams_no_delam = analysis.list_beams
+freq, fft_no_delam = analysis.beam_FT()
+
+
 
 plt.legend(('Center beam w/ AR delam.', 'Border beam w/ AR delam.', 'Center beam w/o AR delam.',
             'Border beam w/o AR delam.'), fontsize= 9)
-#plt.savefig('../delamination_multichromatic.pdf')  
-plt.show()
+plt.savefig('delamination_multichromatic', dpi=300, bbox_inches='tight')  
+plt.close()
 
-fft_dB_onaxis = 10*np.log10(fft_delam[0].real**2)
-fft_dB_offaxis = 10*np.log10(fft_delam[1].real**2)
+fft_dB_onaxis_delam = 10*np.log10(fft_delam[0].real**2)
+#fft_dB_offaxis_delam = 10*np.log10(fft_delam[1].real**2)
+fft_dB_onaxis = 10*np.log10(fft_no_delam[0].real**2)
+#fft_dB_offaxis = 10*np.log10(fft_no_delam[1].real**2)
 
 plt.figure()
-plt.plot(freq*360, fft_dB_onaxis, c='r', linestyle = '-')
-plt.plot(freq*360, fft_dB_offaxis, c ='b', linestyle = '-')
-# plt.semilogy(freq*200*360, fft_no_delam[0].real**2, c ='r', linestyle = '--')
-# plt.semilogy(freq*200*360, fft_no_delam[1].real**2, c= 'b', linestyle = '--')
-plt.legend(('FFT On axis w/ delamination', 'FFT Off-axis w/ delamination',
+plt.plot(freq*360, fft_dB_onaxis_delam, c='r', linestyle = '-')
+#plt.plot(freq*360, fft_dB_offaxis_delam, c ='b', linestyle = '-')
+plt.plot(freq*360, fft_dB_onaxis, c ='r', linestyle = '--')
+#plt.plot(freq*360, fft_dB_offaxis, c= 'b', linestyle = '--')
+plt.legend(('FFT On axis w/ delamination', #'FFT Off-axis w/ delamination',
             'FFT On axis w/o delamination', 'FFT Off-axis w/o delamination'))
 plt.ylim((-100, 1))
-plt.show()
+plt.xlim((-50, 50))
+plt.savefig('Test_FFT_2mm', dpi=300, bbox_inches='tight')
+plt.close()
+
+plt.figure()
+plt.plot(freq*360, fft_dB_onaxis_delam, c='r', linestyle = '-')
+#plt.plot(freq*360, fft_dB_offaxis_delam, c ='b', linestyle = '-')
+plt.plot(freq*360, fft_dB_onaxis, c ='r', linestyle = '--')
+#plt.plot(freq*360, fft_dB_offaxis, c= 'b', linestyle = '--')
+plt.legend(('FFT On axis w/ delamination', #'FFT Off-axis w/ delamination',
+            'FFT On axis w/o delamination', 'FFT Off-axis w/o delamination'))
+plt.ylim((-40, 1))
+plt.xlim((-15, 15))
+plt.savefig('Test_FFT_2mm_zoom', dpi=300, bbox_inches='tight')
+plt.close()

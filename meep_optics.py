@@ -1,6 +1,9 @@
 import meep as mp
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from mpi4py import MPI
 import h5py
 import os
 import glob
@@ -97,21 +100,20 @@ class OpticalSystem(object):
             delam = np.int(np.around(component.delaminate*resolution))
             #Write AR coating on left surface
             if component.AR_left is not None :
-                
-                epsilon_map[x_left - component.AR_left - delam: x_left - delam, 
-                            y_negative] *= component.AR_material
-                
-                if y_res != 0 :
-                    epsilon_map[x_left - component.AR_left - delam: x_left - delam, 
-                                y_positive] *= component.AR_material
+                AR_thick = np.int(np.around(component.AR_left*resolution))
+                epsilon_map[x_left - AR_thick - delam: x_left - delam, y_negative] *= component.AR_material
+                if y_res != 0:
+                     epsilon_map[x_left - AR_thick - delam: x_left - delam, y_positive] *= component.AR_material
             
             #Write AR coating on right surface                    
             if component.AR_right is not None :
-                epsilon_map[x_right + 1 + delam: component.AR_right + x_right + 1 + delam, 
+                AR_thick = np.int(np.around(component.AR_right*resolution))
+
+                epsilon_map[x_right + 1 + delam: AR_thick + x_right + 1 + delam, 
                             y_negative] *= component.AR_material
-                
+
                 if y_res != 0 :
-                    epsilon_map[x_right + 1 + delam: component.AR_right + x_right + 1 + delam, 
+                    epsilon_map[x_right + 1 + delam: AR_thick + x_right + 1 + delam, 
                                 y_positive] *= component.AR_material
             
             
@@ -205,12 +207,17 @@ class OpticalSystem(object):
         #Only plots the lenses, allows to check their dispostion and shape
         
         plt.imshow(self.permittivity_map.transpose())
+        plt.savefig('lenses')
+        plt.close()
         
     def write_h5file(self):
         #Writes the file that will then be read within the sim function
         
-        h = h5py.File('epsilon_map.h5', 'w')
+        #rank = MPI.COMM_WORLD.rank
+
+        h = h5py.File('epsilon_map.h5', 'w')#, driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('eps', data=self.permittivity_map)
+        h.close()
         
     def delete_h5file(self):
         #Deletes the h5 file, can be useful when the file is heavy and not to 
@@ -355,12 +362,12 @@ class Sim(object):
         self.cell = mp.Vector3(self.opt_sys.size_x+2*dpml, self.opt_sys.size_y+2*dpml)
         
     def define_source(self, frequency, 
-               sourcetype = 'Plane wave', 
-               x = 0, y = 0, 
-               size_x = 0, size_y = 300, 
-               beam_width = 0, 
-               focus_pt_x = 0, focus_pt_y = 0,
-               fwidth = 0):
+                      sourcetype = 'Plane wave', 
+                      x = 0, y = 0, 
+                      size_x = 0, size_y = 300, 
+                      beam_width = 0, 
+                      focus_pt_x = 0, focus_pt_y = 0,
+                      fwidth = 0):
         """
         Defines the source to be used by the simulation. Only does one source
         at a time.
@@ -415,14 +422,14 @@ class Sim(object):
         #Different action for different source types
         if sourcetype == 'Plane wave':
             self.source = [mp.Source(mp.ContinuousSource(frequency, is_integrated=True),
-                      component=mp.Ez,
-                      center=mp.Vector3(x_meep, y_meep, 0),
-                      size=mp.Vector3(size_x, size_y, 0))]
+                           component=mp.Ez,
+                           center=mp.Vector3(x_meep, y_meep, 0),
+                           size=mp.Vector3(size_x, size_y, 0))]
         
         elif sourcetype == 'Gaussian beam':
             self.source = [mp.GaussianBeamSource(mp.ContinuousSource(frequency),
                       component = mp.Ez,
-                      center = mp.Vector3(self.opt_sys.image_plane_pos-1, y_meep, 0),
+                      center = mp.Vector3(x_meep, y_meep, 0),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y),
                       beam_kdir = mp.Vector3(-1, 0),
                       beam_w0 = beam_width,
@@ -440,7 +447,7 @@ class Sim(object):
             #The cutoff is the rise and decay time of the gaussian pulse, it's
             #set to 1 here so that is shorter, but may give rise to high frequency
             #artifacts
-            self.source = [mp.GaussianBeamSource(mp.GaussianSource(frequency, fwidth = self.fwidth, cutoff = 1),
+            self.source = [mp.GaussianBeamSource(mp.GaussianSource(frequency, fwidth = self.fwidth, cutoff = 5),
                       component = mp.Ez,
                       center = mp.Vector3(self.opt_sys.image_plane_pos-1, y_meep, 0),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y),
@@ -517,60 +524,107 @@ class Sim(object):
         plt.show()
     
     def plot_efield(self):
+
+        #Makes a plot of the Ez component of the electric field in the system
         
         eps_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Dielectric)
         ez_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Ez)
-        plt.figure()
+        plt.figure(figsize = (20,20))
         plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary')
         plt.imshow(ez_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9)
         plt.xlabel('x times resolution')
         plt.ylabel('y times resolution')
+        plt.savefig('efield')
         plt.show()
         
     def plot_airy_spot(self):
+
+        #Makes a plot of the evolution of the instantaneous Ez squared over the 
+        #image plane, if the system is properly focused, for an incoming plane
+        #wave, should give an Airy pattern
+
         plt.figure()
-        for k in range(np.int(1/self.frequency*0.5)):
+        for k in range(np.int(5/self.frequency*0.5)):
             self.sim.run(until = 1)
+            #Gets the e-field just 1 unit before the image plane
             ez_data = self.sim.get_array(center=mp.Vector3(self.opt_sys.image_plane_pos-1, 0), 
                                          size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)
-            plt.scatter(np.arange(len(ez_data)), ez_data**2, marker = '+')
+            plt.scatter(np.arange(len(ez_data)/self.sim_resolution), ez_data**2, marker = '+')
         plt.title('$E^2$ at image plane')
-        plt.xlabel('y times resolution')
+        plt.xlabel('y (mm)')
         plt.ylabel('$E^2$')
         plt.show()
     
-    def plot_beam(self, single_plot = True, colors = ['r'], plot_n = 0, beam_height = 0., linestyle = '-',
+    def plot_beam(self, single_plot = True, colors = ['r'], plot_n = 0, linestyle = '-',
                   aper_pos_x = 10):
-        
+        """
+        Plots the Ez component of the electric field at the aperture. Is used when
+        the source is a gaussian beam at the image plane.
+
+        Parameters
+        ----------
+        single_plot : BOOLEAN, optional
+            Default to True, so that it gives a single plot. If single_plot is 
+            False, you can call the function several times so that the plots are
+            on the same figure
+        colors : LIST OF STR, optional
+            When using this function for mutliple plots, the color can be chosen
+            for plot clarity.
+        plot_n : INT, optional
+            When plotting for mutliple beams, allows to pick the right color
+            within the list. The default is 0.
+        linestyle : STR, optional
+            When using this function for multiple plots, the linestyle can be chosen
+            for plot clarity
+        aper_pos_x : FLOAT, optional
+            Position of aperture, at which the electric field is computed.
+        Returns
+        -------
+        E_mean : LIST of ARRAYS
+            List of the computed electric fields at the aperture
+
+        """
+
         if single_plot :
+            #Displays the plot if single_plot is True
             plt.figure()
-            
+        
+        #MEEP's lowest timestep that is not rounded by the sim.run is .5
         timestep = .5
+
         if self.multichromatic:
+            #When the beam is multichromatic, the average needs has to be done
+            #on the gaussian pulse duration to get the maximum information 
+            #The gaussian pulse duration is 2*1/fwidth
             n_iter = np.int(5/(self.fwidth*timestep))
-            print(n_iter)
+
         elif not self.multichromatic: 
+            #When the beam is monochromatic, the average can be done on a single 
+            #period
             n_iter = np.int(1/(2*self.frequency*timestep)) 
         
         ez_data = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0), 
                                          size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)**2
+        ### Averaging
         for k in range(n_iter):
             self.sim.run(until = timestep)
             ez_data += self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0), 
                                          size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)**2
         
         E_mean = ez_data/(n_iter+1)
+
+        ### Plot
         plt.plot(np.arange(len(ez_data))/self.sim_resolution, 
                     E_mean, 
                     color = colors[plot_n],
                     alpha = .9,
-                    #label = '{:d} mm'.format(int(beam_height)),
                     linestyle = linestyle) 
         plt.title('Average $E^2$ in front of aperture, $\lambda = ${:2.1} mm'.format(1/self.frequency))
         plt.xlabel('y (mm)')
         plt.ylabel('$E^2$')
     
         if single_plot :
+            #Displays the plot if single_plot is True
             plt.show()
         
         return E_mean
@@ -588,33 +642,37 @@ class Analysis(object):
         colors = plt.cm.viridis(np.linspace(0, 1, Nb_sources))
         self.list_beams = [[] for k in range(Nb_sources)]
         for k in range(Nb_sources):
-            height = y_max*k/(Nb_sources-1)
+            if Nb_sources != 1 :
+                height = y_max*k/(Nb_sources-1)
+            else :
+                height = 0
             self.sim.define_source(frequency, 
                                    sourcetype = sourcetype,
-                                   x=710.704, y = height, 
-                                   size_x = 0, size_y = 300, 
+                                   x=self.sim.opt_sys.size_x/2-10, y = height, 
+                                   size_x = 0, size_y = 10, 
                                    beam_width = 10, 
                                    focus_pt_x = 0, focus_pt_y = 0,
                                    fwidth = fwidth)
             
             self.sim.run_sim(runtime = 750, sim_resolution = sim_resolution)
             #self.sim.plot_efield()
-            E_field = self.sim.plot_beam(single_plot = False, colors= colors, plot_n = k, beam_height = height, linestyle = linestyle)
+            E_field = self.sim.plot_beam(single_plot = False, colors= colors, plot_n = k, linestyle = linestyle)
             self.list_beams[k] = E_field
         
         #plt.legend(fontsize = 9)        
         #plt.show()
     
-    def beam_FT(self):
+    def beam_FT(self, aperture_size = 200):
         FFTs = [[] for k in range(len(self.list_beams))]
         res = self.sim.sim_resolution
         #y_axis = np.arange(200*res)/res
         
-        freq = np.fft.fftfreq(200*res)
+        freq = np.fft.fftfreq(aperture_size*res)
                 
         for k in range(len(self.list_beams)):
-                                                
-            FFTs[k] = np.fft.fft(self.list_beams[k][50*res+1:250*res+1])
+            index_1 = np.int(np.around((self.sim.opt_sys.size_y-aperture_size)/2))
+
+            FFTs[k] = np.fft.fft(self.list_beams[k][index_1*res+1:(index_1+aperture_size)*res+1])
             FFTs[k] = FFTs[k]/FFTs[k][0]
         
         return freq, FFTs
@@ -634,8 +692,8 @@ if __name__ == '__main__':
                          thick = 40, 
                          x = 130.+10., 
                          y = 0., 
-                         AR_left = 5, AR_right = 5,
-                         AR_delamination = 0)
+                         AR_left = .5, AR_right = .5,
+                         AR_delamination = 1)
     
     lens2 = AsphericLens(name = 'Lens 2', 
                          r1 = 269.190, 
@@ -645,8 +703,8 @@ if __name__ == '__main__':
                          thick = 40, 
                          x = 40.+130.+369.408+10., 
                          y = 0.,
-                         AR_left = 5, AR_right = 5,
-                         AR_delamination = 0)
+                         AR_left = .5, AR_right = .5,
+                         AR_delamination = 1)
     
     aperture_stop = ApertureStop(name = 'Aperture Stop',
                                  pos_x = 10,
@@ -668,33 +726,39 @@ if __name__ == '__main__':
     opt_sys.add_component(image_plane)
     print(opt_sys.list_components())
     
-    study_freq = 0.05
+    study_freq = 0.5
     dpml = np.int(np.around(0.5*1/study_freq))
     
-    opt_sys.assemble_system(dpml = dpml, resolution = 1)
-    #opt_sys.plot_lenses()
+    opt_sys.assemble_system(dpml = dpml, resolution = 5)
+    opt_sys.plot_lenses()
     opt_sys.write_h5file()
     
     sim = Sim(opt_sys)
-    # sim.define_source(study_freq, sourcetype = 'Gaussian beam multichromatic', 
-    #                   x=712.704, y= 0, beam_width = 10, 
-    #                   focus_pt_x= 0, focus_pt_y=0,
-    #                   fwidth = 0.08)
-    # sim.run_sim(runtime = 750, sim_resolution = 7)
+    sim.define_source(study_freq, sourcetype = 'Gaussian beam', 
+                      x=710, y= 0, beam_width = 0, 
+                      focus_pt_x= 0, focus_pt_y=0, size_x = 0, size_y=10)
+                    #  fwidth = 0.01)
+    sim.run_sim(runtime = 50, sim_resolution = 5)
     # sim.plot_system()
-    # sim.plot_efield()
+    sim.plot_efield()
     # sim.plot_airy_spot()
     # sim.plot_beam()
-    
+    """
     analysis = Analysis(sim)
     analysis.image_plane_beams(study_freq, fwidth = 0.01, sourcetype='Gaussian beam multichromatic',
                                 y_max = 100, Nb_sources = 2, sim_resolution = 1)
-    freq, ffts = analysis.beam_FT()
+    freq, ffts = analysis.beam_FT(aperture_size = 200)
     
+    fft1_dB = 10*np.log10(ffts[0].real**2)
+    fft2_dB = 10*np.log10(ffts[1].real**2)
+
     plt.figure()
-    plt.plot(freq, ffts[0].real**2)
+    plt.plot(freq*360, fft1_dB)
     #plt.plot(freq, ffts[0].imag)
-    plt.plot(freq, ffts[1].real**2)
+    plt.plot(freq*360, fft2_dB)
     plt.legend(('FFT Beam On axis', 'FFT Beam Off-axis'))
-    plt.show()
-    
+    plt.ylim((-100, 1))
+    plt.xlim((-50,50))
+    plt.savefig('Test',dpi=300, bbox_inches='tight')
+    plt.close()
+    """
