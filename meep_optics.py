@@ -226,6 +226,18 @@ class OpticalSystem(object):
         file = glob.glob('epsilon_map.h5')
         os.remove(file[0])
         
+    def sys_info(self, wavelength = None, frequency = None):
+
+        c = 299792458.0
+        if wavelength is not None :
+           frequency = 1/wavelength
+
+        if frequency is not None:
+            wavelength = 1/frequency
+
+        print('System size = {} x {} wavelengths'.format(self.size_x/wavelength, self.size_y/wavelength))
+
+
                 
 class AsphericLens(object):
     """
@@ -239,7 +251,7 @@ class AsphericLens(object):
                  c1=None, c2=None, 
                  thick=None, 
                  x=0., y=0., 
-                 index = 1.52, 
+                 n_refr = 1.52, 
                  AR_left = None, AR_right = None,
                  AR_delamination = 0):
         
@@ -251,11 +263,11 @@ class AsphericLens(object):
         self.thick = thick              #THICKNESS AT CENTER
         self.x = x                      #X POSITION OF LEFT SURFACE CENTER
         self.y = y                      #Y POSITION OF LEFT SURFACE CENTER
-        self.material = index**2        #DIELECTRIC PERMITTIVITY
+        self.material = n_refr**2       #DIELECTRIC PERMITTIVITY
         self.object_type = 'Lens'
         self.AR_left = AR_left          #LEFT AR COATING THICKNESS
         self.AR_right = AR_right        #RIGHT AR COATING THICKNESS
-        self.AR_material = index        #AR COATING PERMITTIVITY
+        self.AR_material = n_refr       #AR COATING PERMITTIVITY
         self.delaminate = AR_delamination #AR COATING DELAMINATION THICKNESS
     
     def left_surface(self, y):
@@ -301,14 +313,14 @@ class ApertureStop(object):
                  diameter = None, 
                  pos_x = None, 
                  thickness = None, 
-                 index  = None, 
+                 n_refr  = None, 
                  conductivity = None):
         
         self.name = name                #NAME OF APERTURE STOP
         self.thick = thickness          #THICKNESS OF AP STOP
         self.x = pos_x                  #POSITION ON OPTICAL AXIS
         self.diameter = diameter        #DIAMETER OF AP ASTOP
-        self.permittivity = index**2    #INDEX OF MATERIAL
+        self.permittivity = n_refr**2    #INDEX OF MATERIAL
         self.conductivity = conductivity #CONDUCTIVITY
         self.object_type = 'AP_stop'
 
@@ -321,7 +333,7 @@ class ImagePlane(object):
                  diameter = None, 
                  pos_x = None, 
                  thickness = None, 
-                 index  = None, 
+                 n_refr  = None, 
                  conductivity = None):
         
         self.name = name                #NAME OF IMAGE PLANE
@@ -331,7 +343,7 @@ class ImagePlane(object):
         
         if conductivity != np.inf :
             #Defines the material with given properties
-            self.material = mp.Medium(epsilon=index**2, 
+            self.material = mp.Medium(epsilon=n_refr**2, 
                                       D_conductivity = conductivity)
         
         else :
@@ -361,21 +373,25 @@ class Sim(object):
         self.pml_layers = [mp.PML(thickness = dpml)]
         self.cell = mp.Vector3(self.opt_sys.size_x+2*dpml, self.opt_sys.size_y+2*dpml)
         
-    def define_source(self, frequency, 
+    def define_source(self, frequency = None,
+                      wavelength = None, 
                       sourcetype = 'Plane wave', 
                       x = 0, y = 0, 
                       size_x = 0, size_y = 300, 
                       beam_width = 0, 
                       focus_pt_x = 0, focus_pt_y = 0,
-                      fwidth = 0):
+                      fwidth = 0,
+                      wvl_width = 0):
         """
         Defines the source to be used by the simulation. Only does one source
         at a time.
 
         Parameters
         ----------
-        frequency : FLOAT
-            Frequency of the source 
+        frequency : FLOAT, optional
+            Frequency of the source
+        wavelength : FLOAT, optional
+            Wavelength of the source 
         sourcetype : STR, optional
             A source can be a plane wave coming on the aperture
             or a gaussian beam on the image plane. The default is 'Plane wave'.
@@ -398,6 +414,9 @@ class Sim(object):
         fwidth : FLOAT, optional
             If the beam is to be multichromatic, defines the frequency width 
             around the  center frequency. The default is 0.
+        wvl_width : FLOAT, optional
+            If the beam is to be multichromatic, defines the wavelength width
+            around the center wavelength. fwdith = 1/width
 
         Returns
         -------
@@ -406,6 +425,18 @@ class Sim(object):
 
         """
         
+        if wavelength is not None :
+           frequency = 1/wavelength
+
+        if frequency is not None:
+            wavelength = 1/frequency
+
+        if wvl_width == 0:
+            wvl_width = 1/fwidth
+
+        if fwidth == 0:
+            fwidth = 1/wvl_width
+
         #Its easier for the user to define the system such that x=0 is the 
         #plane on the left and note the center of the cell, this allows for that :
         x_meep = x - self.opt_sys.size_x/2
@@ -630,22 +661,101 @@ class Sim(object):
         return E_mean
     
 class Analysis(object):
+    """
+    When analyzing an optical system such as a telescope, we want to see the impact
+    of changes on the far field beam. To that end, gaussian beams are sent from
+    the image plane at different locations to recover different E fields squared
+    at the aperture, of which the Fourier Transform can be taken. 
+    """
     
     def __init__(self, sim):
+        """
+        Runs on a specific sim environment : the objects and their properties as 
+        specified in the sim will be the same all throughout the analysis.
+        """
         self.sim = sim
         
-    def image_plane_beams(self, frequency, fwidth = 0, sourcetype = 'Gaussian beam', 
-                          y_max = 0., Nb_sources = 1., sim_resolution = 1,
-                          linestyle = '-'):
-        
-        #plt.figure()
+    def image_plane_beams(self, frequency = None, wavelength = None, 
+                        fwidth = 0, wvl_width = 0,
+                        sourcetype = 'Gaussian beam', 
+                        y_max = 0., Nb_sources = 1., sim_resolution = 1,
+                        linestyle = '-', runtime = 800):
+        """
+        Sends gaussian beams (mono or multichromatic) from the image plane and 
+        recovers the E-field squared at the aperture. Also plots the electric 
+        fields at the aperture.
+
+        Parameters
+        ----------
+        frequency : FLOAT, optional
+            Frequency of the source
+        wavelength : FLOAT, optional
+            Wavelength of the source 
+        fwidth : FLOAT, optional
+            If the beams are to be multichromatic, defines the frequency width 
+            around the  center frequency. The default is 0.
+        wvl_width : FLOAT, optional
+            If the beams are to be multichromatic, defines the wavelength width
+            around the center wavelength. fwdith = 1/wvl_width
+        y_max : FLOAT, optional
+            If the number of sources is more than one, the beams sent from the 
+            image plane are equally spaced between y=0 on the optical axis and y_max.
+        Nb_souyrces : FLOAT, optional
+            Number of sources for the analysis. Ideally, 2 so that one is on the optical
+            axis and the other on the edge of the image plane, to get a maximum of 
+            information without running too many sims.
+        sim_resolution : INT, optional
+            Is set so that wavelength*resolution should be >8 in the highest 
+            index materials
+        sourcetype : STR, optional
+            Either 'Gaussian beam' or 'Gaussian beam multichromatic.
+        linestyle : STR, optional
+            When running two analysis to compare some effect, linestyle can 
+            be changed between the two so that comparison on the plot is
+            easier
+        runtime : FLOAT, optional
+            This is the time for which the sim should run before aveaging the field 
+            over the duration of the gaussian pulse. Ideally it is set so that
+            the gaussian pulse arrives just before the aperture stop.
+        Returns
+        -------
+        None, but registers self.list_beams in which the averaged electric fields
+        are stored. self.list_beams[k] stores the averaged electric field for the
+        k-th beam.
+
+        """
+
+        # Adaptation to specify either in wavelength or frequency :
+        if wavelength is not None :
+           frequency = 1/wavelength
+
+        if frequency is not None:
+            wavelength = 1/frequency
+
+        if wvl_width == 0:
+            wvl_width = 1/fwidth
+
+        if fwidth == 0:
+            fwidth = 1/wvl_width
+
+        #For the plot of the electric fields, the cmpap is created for the colors
+        #to represent the distance from the optical axis
         colors = plt.cm.viridis(np.linspace(0, 1, Nb_sources))
-        self.list_beams = [[] for k in range(Nb_sources)]
+
+        #Initialize the electric fields list
+        self.list_efields = [[] for k in range(Nb_sources)]
+
+        #Iterates over the number of sources
         for k in range(Nb_sources):
+
+            #If there is only one source, the beam is sent on the optical axis
+            #Avoids division y zero
             if Nb_sources != 1 :
                 height = y_max*k/(Nb_sources-1)
-            else :
+            else : 
                 height = 0
+
+            #Defines the source at the appropriate height on the image plane
             self.sim.define_source(frequency, 
                                    sourcetype = sourcetype,
                                    x=self.sim.opt_sys.size_x/2-10, y = height, 
@@ -654,25 +764,62 @@ class Analysis(object):
                                    focus_pt_x = 0, focus_pt_y = 0,
                                    fwidth = fwidth)
             
-            self.sim.run_sim(runtime = 750, sim_resolution = sim_resolution)
-            #self.sim.plot_efield()
-            E_field = self.sim.plot_beam(single_plot = False, colors= colors, plot_n = k, linestyle = linestyle)
-            self.list_beams[k] = E_field
-        
-        #plt.legend(fontsize = 9)        
-        #plt.show()
-    
-    def beam_FT(self, aperture_size = 200):
-        FFTs = [[] for k in range(len(self.list_beams))]
-        res = self.sim.sim_resolution
-        #y_axis = np.arange(200*res)/res
-        
-        freq = np.fft.fftfreq(aperture_size*res)
-                
-        for k in range(len(self.list_beams)):
-            index_1 = np.int(np.around((self.sim.opt_sys.size_y-aperture_size)/2))
+            #Runs the sim
+            self.sim.run_sim(runtime = runtime, sim_resolution = sim_resolution)
 
-            FFTs[k] = np.fft.fft(self.list_beams[k][index_1*res+1:(index_1+aperture_size)*res+1])
+            #Gets the squared averaged electric field and adds it to the plot
+            E_field = self.sim.plot_beam(single_plot = False, colors= colors, plot_n = k, linestyle = linestyle)
+
+            #Updates the list of fields
+            self.list_efields[k] = E_field
+        
+    
+    def beam_FT(self, aperture_size = 200, precision_factor = 5):
+
+        """
+        Gets the Fourier Transforms of the averaged  squared electric fields at aperture.
+        Parameters
+        ----------
+        aperture_size : FLOAT, optional
+            Size of the aperture. Only the relevant part of the electric field is then
+            used for the fourier transform
+        precision_factor : FLOAT, optional
+            If the gaussian pattern over the aperture is large, the precision_factor
+            is used to add zeros to the electric field list so that the final list is
+            bigger by a factor of precision_factor. This adds precision in the fourier
+            transform
+        Returns
+        -------
+        freq : List of FLOATS
+            List of the frequencies at which the FFT has been done
+        FFTs : List of arrays
+            Each array contains the FFT for the k-th source.
+        """
+
+        #Initialize the list
+        FFTs = [[] for k in range(len(self.list_efields))]
+
+        res = self.sim.sim_resolution
+
+        #List of frequencies
+        freq = np.fft.fftfreq(aperture_size*res*precision_factor)
+
+        #Iterate over the number of sources
+        for k in range(len(self.list_beams)):
+
+            #Indexes of the beginning and end of aperture
+            index_ap = np.int(np.around((self.sim.opt_sys.size_y-aperture_size)/2))
+
+            #Truncates field over aperture
+            truncated_field = self.list_efields[k][index_ap*res+1:(index_ap+aperture_size)*res+1]
+
+            #Extends field for precision factor
+            efield_ext = np.zeros(aperture_size*res*precision_factor)
+            n = np.int(precision_factor/2)
+            efield_ext[aperture_size*res*n : aperture_size*res*(n+1)] += truncated_field 
+
+            #FFT over the extended field
+            FFTs[k] = np.fft.fft(efield_ext)
             FFTs[k] = FFTs[k]/FFTs[k][0]
         
         return freq, FFTs
@@ -710,14 +857,14 @@ if __name__ == '__main__':
                                  pos_x = 10,
                                  diameter = 200,
                                  thickness = 5,
-                                 index = 5., 
+                                 n_refr = 5., 
                                  conductivity = 1e7)
     
     image_plane = ImagePlane(name = 'Image Plane',
                              pos_x = 10+714.704,
                              diameter = 300,
                              thickness = 2,
-                             index = 5., 
+                             n_refr = 5., 
                              conductivity = 0.01)
     
     opt_sys.add_component(lens1)
@@ -725,20 +872,20 @@ if __name__ == '__main__':
     opt_sys.add_component(aperture_stop)
     opt_sys.add_component(image_plane)
     print(opt_sys.list_components())
+    opt_sys.sys_info(frequency = 0.5)
     
     study_freq = 0.5
     dpml = np.int(np.around(0.5*1/study_freq))
     
-    opt_sys.assemble_system(dpml = dpml, resolution = 5)
+    opt_sys.assemble_system(dpml = dpml, resolution = 2)
     opt_sys.plot_lenses()
     opt_sys.write_h5file()
     
     sim = Sim(opt_sys)
-    sim.define_source(study_freq, sourcetype = 'Gaussian beam', 
-                      x=710, y= 0, beam_width = 0, 
+    sim.define_source(wavelength = 8, sourcetype = 'Gaussian beam', 
+                      x=710, y= 0, beam_width = 10, 
                       focus_pt_x= 0, focus_pt_y=0, size_x = 0, size_y=10)
-                    #  fwidth = 0.01)
-    sim.run_sim(runtime = 50, sim_resolution = 5)
+    sim.run_sim(runtime = 800, sim_resolution = 2)
     # sim.plot_system()
     sim.plot_efield()
     # sim.plot_airy_spot()
