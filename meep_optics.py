@@ -8,6 +8,7 @@ from mpi4py import MPI
 import h5py
 import os
 import glob
+import csv
 
 mp.verbosity(0)
 
@@ -73,50 +74,82 @@ class OpticalSystem(object):
         # The y axis has its zero in the middle of the cell, the offset
         # is mid_y
         mid_y = np.int(self.size_y*resolution/2)
-        
-        for y_res in range(mid_y) :
-        
-            thick = component.thick*resolution
+
+        thick = component.thick*resolution
+
+        #Generate the center of the lumps made by delamination, 
+        #different for the left and right surface
+        high = np.int(np.around(self.size_y*0.9/2))
+        y0_left = np.random.randint(low = -high, high = high)
+        y0_right = np.random.randint(low = -high, high = high)
+
+        for y_res in range(mid_y) :           
             
             #Left surface sag
             x_left = np.int(np.around((
-                        component.left_surface(y_res/resolution) + 
-                        component.x)*resolution))
+                        component.left_surface(y_res/resolution) + self.dpml + 
+                        component.x - component.thermal_deformation((y_res+mid_y)/resolution))*resolution))
             #Right surface sag       
             x_right = np.int(np.around((
                         component.right_surface(y_res/resolution) + 
-                        component.x)*resolution + 
+                        component.x + self.dpml)*resolution + 
                         thick))
             
             #Above and below the optical axis :
             y_positive = self.dpml*resolution + mid_y + y_res
             y_negative = self.dpml*resolution + mid_y - y_res
+
+            #Get the delamination as a function of y on left surface
+            delam_pos_L = np.int(np.around(resolution*
+                component.delamination(y_res/resolution, y0_left)))
+            delam_neg_L = np.int(np.around(resolution*
+                component.delamination(-y_res/resolution, y0_left)))
+
+            #Get the delamination as a function of y on right surface
+            delam_pos_R = np.int(np.around(resolution*
+                component.delamination(y_res/resolution, y0_right)))
+            delam_neg_R = np.int(np.around(resolution*
+                component.delamination(-y_res/resolution, y0_right)))
             
+            #Gradient in the index
+            radial_slope = component.radial_slope/resolution
+            axial_slope = component.axial_slope/resolution
+            n0 = component.material
+            x0 = np.int(np.around(component.x*resolution))
+            x_range = range(x_left, x_right+1) 
+            material_line = [n0 + y_res*radial_slope + (k-x0)*axial_slope for k in x_range]
+
+
             #Write lens between left and right surface below optical axis
-            epsilon_map[x_left:x_right+1, y_negative] *= component.material
+            epsilon_map[x_left:x_right+1, y_negative] *= material_line
             
-            #So that the center line is not affectef twice :
+            #So that the center line is not affected twice :
             if y_res != 0 :
                 #Write lens between left and right surface above optical axis
-                epsilon_map[x_left:x_right+1, y_positive] *= component.material
+                epsilon_map[x_left:x_right+1, y_positive] *= material_line
             
-            delam = np.int(np.around(component.delaminate*resolution))
             #Write AR coating on left surface
             if component.AR_left is not None :
-                AR_thick = np.int(np.around(component.AR_left*resolution))
-                epsilon_map[x_left - AR_thick - delam: x_left - delam, y_negative] *= component.AR_material
-                if y_res != 0:
-                     epsilon_map[x_left - AR_thick - delam: x_left - delam, y_positive] *= component.AR_material
-            
-            #Write AR coating on right surface                    
-            if component.AR_right is not None :
-                AR_thick = np.int(np.around(component.AR_right*resolution))
 
-                epsilon_map[x_right + 1 + delam: AR_thick + x_right + 1 + delam, 
+                AR_thick = np.int(np.around(component.AR_left*resolution))
+
+                epsilon_map[x_left - AR_thick - delam_neg_L: x_left - delam_neg_L, 
                             y_negative] *= component.AR_material
 
                 if y_res != 0 :
-                    epsilon_map[x_right + 1 + delam: AR_thick + x_right + 1 + delam, 
+                    epsilon_map[x_left - AR_thick - delam_pos_L: x_left - delam_pos_L, 
+                                y_positive] *= component.AR_material
+            
+            #Write AR coating on right surface                    
+            if component.AR_right is not None :
+                
+                AR_thick = np.int(np.around(component.AR_right*resolution))
+
+                epsilon_map[x_right + 1 + delam_neg_R: AR_thick + x_right + 1 + delam_neg_R, 
+                            y_negative] *= component.AR_material
+
+                if y_res != 0 :
+                    epsilon_map[x_right + 1 + delam_pos_R: AR_thick + x_right + 1 + delam_pos_R, 
                                 y_positive] *= component.AR_material
             
             
@@ -205,10 +238,124 @@ class OpticalSystem(object):
                 
             
         self.permittivity_map = epsilon_map
+
+    def make_lens_bubbles(self, radius, nb_clusters, nb_per_cluster, r_factor = 1):
+
+        """
+        Introduces clusters of air bubbles inside the lenses of the system, 
+        each cluster has a central bubble and a number of smaller bubble gathered
+        around this central bubble
         
+        Inputs : 
+            - radius : radius of the central bubble
+            - nb_clusters : number of clusters per lens
+            - nb_per_cluster : number of bubbles surrounding the main one in each
+            cluster
+            - r_factor : the factor by which the radii are multiplied, allows for the 
+            investigation of bubble size only
+
+        Affects the self.permittivity_map object.
+        """
+
+        res = self.resolution
+
+        #Function, given a radius, that returns the indices of the points within 
+        #the circle centered on (0,0)
+        def bubble(rad):
+            bubble = []
+            for k in range(-rad, rad+1):
+                for j in range(-rad, rad+1):
+                    if k**2 + j**2 <= rad**2 :
+                        bubble.append([k,j])
+            return np.array(bubble)
+
+        #List of centers of bubbles
+        list_centers = []
+
+        #List of radii of bubbles
+        list_radii = []
+
+        #Iterate for all lenses
+        for component in self.components:
+
+            if component.object_type == 'Lens':
+
+                #Lens thickness
+                thick = component.thick*res
+
+                #So that the bubbles aren't generated on the very edge of the lenses
+                low = np.int(np.around(self.size_y*res*0.1))
+                high = np.int(np.around(self.size_y*res*0.9))
+
+                #Iterate over cluster numbers
+                for i in range(nb_clusters):
+
+                    #The center of the lens can be anywhere on the y axis
+                    y0 = np.random.randint(low = low, high = high)
+
+                    #Left surface sag
+                    x_left = np.int(np.around((
+                        component.left_surface(y0/res - self.size_y/2) + 
+                        component.x)*res))
+                    #Right surface sag       
+                    x_right = np.int(np.around((
+                        component.right_surface(y0/res - self.size_y/2) + 
+                        component.x)*res + 
+                        thick))
+
+                    #The center of the cluster has to be inside the lens
+                    x0 = np.random.randint(low = x_left, high = x_right+1)
+
+                    #Radius of the main can vary by 10 percent
+                    radius_0 = radius*(0.9 + np.random.random()*0.2)
+                
+                    #Update lists
+                    list_centers.append([x0,y0])
+                    list_radii.append(radius_0)
+
+                    #Iterate over the number of surrounding bubbles
+                    for k in range(nb_per_cluster):
+
+                        #The center of each surrounding bubble is random, within
+                        #a certain distance of the central bubble
+                        phi = np.random.random()*2*np.pi
+                        r = radius_0*(1 + np.random.random()*3)
+
+                        #change of variables
+                        x_k = np.int(np.around(r*np.cos(phi)*res))
+                        y_k = np.int(np.around(r*np.sin(phi)*res))
+
+                        #The radius is a function of distance, the farther the 
+                        #smaller
+                        radius_k = radius_0*np.exp(-r/(3*radius_0))*np.random.random()
+
+                        #Update lists
+                        list_centers.append([x0+x_k, y0+y_k])
+                        list_radii.append(radius_k)
+
+        list_centers = np.array(list_centers)
+        list_radii = np.array(list_radii)
+        list_radii *= r_factor
+        list_all = []
+
+        #Making bubbles for all centers and radii
+        for k in range(len(list_centers)):
+            radius_k = np.int(np.around(list_radii[k]*res))
+            bubble_k = bubble(radius_k)
+            for u in bubble_k : 
+                list_all.append(list_centers[k] + u)
+
+        #Update the map
+        for index in list_all : 
+            self.permittivity_map[index[0], index[1]] = 1
+
+
+
+            
     def plot_lenses(self):
         #Only plots the lenses, allows to check their dispostion and shape
         
+        plt.figure(figsize = (15,15))
         plt.imshow(self.permittivity_map.transpose())
         plt.savefig('lenses')
         plt.close()
@@ -238,7 +385,8 @@ class OpticalSystem(object):
         if frequency is not None:
             wavelength = 1/frequency
 
-        print('System size = {} x {} wavelengths'.format(self.size_x/wavelength, self.size_y/wavelength))
+        print('System size = {} x {} wavelengths'.format(self.size_x/wavelength, 
+                                                        self.size_y/wavelength))
 
 
                 
@@ -256,7 +404,11 @@ class AsphericLens(object):
                  x=0., y=0., 
                  n_refr = 1.52, 
                  AR_left = None, AR_right = None,
-                 AR_delamination = 0):
+                 delam_thick = 0,
+                 delam_width = 10,
+                 radial_slope = 0,
+                 axial_slope = 0,
+                 therm_def = False):
         
         self.name = name                #NAME OF LENS  
         self.r1 = r1                    #LEFT SURFACE RADIUS
@@ -268,10 +420,32 @@ class AsphericLens(object):
         self.y = y                      #Y POSITION OF LEFT SURFACE CENTER
         self.material = n_refr**2       #DIELECTRIC PERMITTIVITY
         self.object_type = 'Lens'
+
         self.AR_left = AR_left          #LEFT AR COATING THICKNESS
         self.AR_right = AR_right        #RIGHT AR COATING THICKNESS
         self.AR_material = n_refr       #AR COATING PERMITTIVITY
-        self.delaminate = AR_delamination #AR COATING DELAMINATION THICKNESS
+        self.delam_thick = delam_thick  #AR COATING DELAMINATION THICKNESS
+        self.delam_width = delam_width  #DELAMINATION LUMP THICKNESS
+
+        self.radial_slope = radial_slope#RADIAL GRADIENT IN THE INDEX
+        self.axial_slope = axial_slope  #AXIAL GRADIENT IN THE INDEX
+
+        self.therm_def = therm_def      #ENABLES THERMAL DEFORMATION
+
+        deform = []
+
+        with open('deformedsurface.csv') as csvfile:
+            reader = csv.reader(csvfile, delimiter=',')
+            k = 0
+            for row in reader:
+                k+= 1 
+                if k>=11 :
+                    deform.append(np.float(row[2]))
+
+        deform0 = 2*deform[0]-deform[1]
+        deform.insert(0, deform0)
+        self.deform = deform
+
     
     def left_surface(self, y):
         """
@@ -305,6 +479,31 @@ class AsphericLens(object):
         else : 
             #If the radius is infinite, returns a flat surface, i.e. 0 sag
             return 0
+
+    def delamination(self, y, y0):
+
+        #Returns the air layer thickness that makes delamination, it is 
+        #zero everywhere excpet where there's the lump, centered on y0, defined by
+        #its width and thickness
+
+        thick = self.delam_thick
+        width = self.delam_width
+        return np.abs(min((((y-y0)/width)**2-1)*thick, 0))
+
+
+    def thermal_deformation(self, y):
+
+        
+        x = np.linspace(0,300, len(self.deform))
+
+        interp_surf = np.interp(y, x, self.deform)
+
+        if self.therm_def :
+            return interp_surf
+
+        else :
+            return 0
+        
 
     
 class ApertureStop(object):
@@ -788,6 +987,9 @@ class Analysis(object):
             j = middle_idx
             while E_field[j].real>c/2 : 
                 j+=1
+                if j == len(E_field):
+                    j = middle_idx
+                    break
             FWHM_ap = (j-middle_idx)*2/sim_resolution
  
             #FWHM is zero if the field has a max not in the middle
@@ -870,8 +1072,10 @@ if __name__ == '__main__':
                          thick = 40, 
                          x = 130.+10., 
                          y = 0., 
-                         AR_left = .5, AR_right = .5,
-                         AR_delamination = 1)
+                         AR_left = 2.5, AR_right = 2.5,
+                         delam_thick = 0,
+                         delam_width = 5,
+                         therm_def = True)
     
     lens2 = AsphericLens(name = 'Lens 2', 
                          r1 = 269.190, 
@@ -881,23 +1085,26 @@ if __name__ == '__main__':
                          thick = 40, 
                          x = 40.+130.+369.408+10., 
                          y = 0.,
-                         AR_left = .5, AR_right = .5,
-                         AR_delamination = 1)
+                         AR_left = 2.5, AR_right = 2.5,
+                         delam_thick = 0,
+                         delam_width = 5)
     
     aperture_stop = ApertureStop(name = 'Aperture Stop',
                                  pos_x = 10,
                                  diameter = 200,
                                  thickness = 5,
-                                 n_refr = 5., 
+                                 n_refr = 1.1, 
                                  conductivity = 1e7)
     
     image_plane = ImagePlane(name = 'Image Plane',
                              pos_x = 10+714.704,
                              diameter = 300,
                              thickness = 2,
-                             n_refr = 5., 
+                             n_refr = 1.2, 
                              conductivity = 0.01)
     
+
+
     opt_sys.add_component(lens1)
     opt_sys.add_component(lens2)
     opt_sys.add_component(aperture_stop)
@@ -905,38 +1112,30 @@ if __name__ == '__main__':
     print(opt_sys.list_components())
     opt_sys.sys_info(frequency = 0.5)
     
-    study_freq = 0.5
-    dpml = np.int(np.around(0.5*1/study_freq))
+    wavelength = 10
+    dpml = 5
+
     
-    opt_sys.assemble_system(dpml = dpml, resolution = 2)
+    opt_sys.assemble_system(dpml = dpml, resolution = 20)
+    #opt_sys.make_lens_bubbles(1, 5, 15)
     opt_sys.plot_lenses()
     opt_sys.write_h5file()
-    
+
+    """
     sim = Sim(opt_sys)
-    sim.define_source(wavelength = 8, sourcetype = 'Gaussian beam', 
+    sim.define_source(wavelength = 10, sourcetype = 'Gaussian beam', 
                       x=710, y= 0, beam_width = 10, 
                       focus_pt_x= 0, focus_pt_y=0, size_x = 0, size_y=10)
-    sim.run_sim(runtime = 800, sim_resolution = 2)
-    # sim.plot_system()
-    sim.plot_efield()
-    # sim.plot_airy_spot()
-    # sim.plot_beam()
-    """
-    analysis = Analysis(sim)
-    analysis.image_plane_beams(study_freq, fwidth = 0.01, sourcetype='Gaussian beam multichromatic',
-                                y_max = 100, Nb_sources = 2, sim_resolution = 1)
-    freq, ffts = analysis.beam_FT(aperture_size = 200)
-    
-    fft1_dB = 10*np.log10(ffts[0].real**2)
-    fft2_dB = 10*np.log10(ffts[1].real**2)
+    sim.run_sim(runtime = 1, sim_resolution = 2)
 
-    plt.figure()
-    plt.plot(freq*360, fft1_dB)
-    #plt.plot(freq, ffts[0].imag)
-    plt.plot(freq*360, fft2_dB)
-    plt.legend(('FFT Beam On axis', 'FFT Beam Off-axis'))
-    plt.ylim((-100, 1))
-    plt.xlim((-50,50))
-    plt.savefig('Test',dpi=300, bbox_inches='tight')
-    plt.close()
+    animate = mp.Animate2D(sim.sim,
+                       fields=mp.Ez,
+                       realtime=True,
+                       field_parameters={'alpha':0.8, 'cmap':'RdBu', 'interpolation':'none'},
+                       boundary_parameters={'hatch':'o', 'linewidth':1.5, 'facecolor':'y', 'edgecolor':'b', 'alpha':0.3})
+
+    sim.sim.run(mp.at_every(5,animate), until = 800)
+    N_fps = 10 #sets the number of frames per second for the movie. Here it has 40 frames, so let's just run at 5fps.
+    animate.to_mp4(N_fps, 'delam_1side.mp4')
+    #sim.plot_efield()
     """
