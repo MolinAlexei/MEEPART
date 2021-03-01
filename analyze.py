@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse as ap
 import h5py
+from scipy import optimize
     
 lens1 = AsphericLens(name = 'Lens 1', 
                      r1 = 327.365, 
@@ -334,27 +335,26 @@ def main():
         legend = ['0mm', '0.5mm', '1.25mm','2.5mm']
         legend = ['No delamination', '0.5mm thick lumps']
         legend = ['1e-3 $mm^{-1}$','5e-4 $mm^{-1}$','1e-4 $mm^{-1}$','0 $mm^{-1}$']
-        legend = ['1mm', '0.5mm', '0mm']
+        legend = ['1mm', '0.5mm', 'No bubbles']
         legend = ['No defects', 'Therm. deform.']
         legend = ['+2 $\%$ change', '0 $\%$ change', '-2 $\%$ change']
         
+        
+        def gaussian(x, stddev, mean):
+            return np.exp(-(((x-mean)/4/stddev)**2))
         for k in range(len(fft)):
 
             i = 0
             while degrees[i]<1 : 
                 i+=1
 
-            middle = np.int((len(fft[k])-1)/2)
+            middle = np.int((len(fft[k])+1)/2)
 
             fft_k = fft[k]
 
-            rads = np.array(degrees) * np.pi/180
             
-            integrand = fft_k* np.sin(rads)
 
-            right_part = np.trapz(integrand[i:middle+2], x = rads[i:middle+2])
-            left_part = np.trapz(integrand[middle+2:-i], x = rads[middle+2:-i])
-            solid_angle = right_part + left_part
+            
 
             fft_dB = 10*np.log10(np.abs(fft[k]))
             if len(fft) >1 :
@@ -362,7 +362,18 @@ def main():
             elif len(fft) ==1 :
                 y = 0
 
-            plt.plot(degrees, fft_dB, label = '{}, {:.2e} srad'.format(legend[k], 2*np.pi*solid_angle))
+            rads = np.array(degrees) * np.pi/180
+            integrand = fft_k* np.sin(rads)
+            integrand = np.append(integrand, integrand[0])
+            rads = np.append(rads, 0)
+            right_part = np.trapz(integrand[0:middle], x = rads[0:middle])
+            left_part = np.trapz(integrand[middle:-0], x = rads[middle:-0])
+            solid_angle = right_part + left_part
+            print('{:.2e}'.format(solid_angle*2*np.pi))
+            
+
+
+            plt.plot(degrees, fft_dB, label = '{}'.format(legend[k]))
 
         plt.ylim((-60, 0))
         plt.xlabel('Angle [deg]', fontsize = 14)
@@ -370,10 +381,11 @@ def main():
         plt.xticks(fontsize = 12)
         plt.yticks(fontsize = 12)
 
-        plt.xlim((0,7))
+        plt.xlim((0,5))
 
         if len(fft)>1 :
             plt.legend(loc = 'upper right', fontsize = 12)
+
 
         #elif len(fft) == 1:
         #    plt.xlim((0,10))
@@ -398,7 +410,18 @@ def main():
         plt.savefig('plots/{}.png'.format(args.file_name))
         plt.close()
 
-    
+        color = ['blue', 'red', 'black']
+        plt.figure()
+        for k in range(len(fft)):
+            fft_k = fft[k]
+            deg = np.array(degrees)*1.
+            popt, _ = optimize.curve_fit(gaussian, deg, np.abs(fft_k))
+            print(2*popt[1] + 2*4*popt[0]*np.sqrt(np.log(2)))
+            plt.plot(degrees, fft_k, color = color[k])
+            plt.plot(degrees, gaussian(deg, popt[0], popt[1]), color = color[k], linestyle = '--')
+            plt.xlim((-2,2))
+        plt.savefig('pouetpouet')
+        plt.close()
 
 
 if __name__ == '__main__':

@@ -750,15 +750,18 @@ class Sim(object):
         plt.ylabel('y times resolution')
         plt.show()
     
-    def plot_efield(self, path = '.'):
+    def plot_efield(self, path = '.', comp = 'Ez') :
 
         #Makes a plot of the Ez component of the electric field in the system
         
         eps_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Dielectric)
-        ez_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Ez)
+        if comp == 'Ez' :
+            e_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Ez)
+        elif comp == 'Ey':
+            e_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Ey)
         plt.figure(figsize = (20,20))
         plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary')
-        plt.imshow(ez_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9)
+        plt.imshow(e_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9)
         plt.xlabel('x times resolution')
         plt.ylabel('y times resolution')
         plt.savefig('{}/efield'.format(path))

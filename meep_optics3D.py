@@ -43,7 +43,8 @@ class OpticalSystem(object):
         """
         Defines the size of the system:
             - size_x is the size along the optical axis
-            - size_y is the size orthogonal to the optical axis in 2D
+            - size_y 
+            - size_z 
         """
         
         self.size_x = size_x
@@ -56,6 +57,7 @@ class OpticalSystem(object):
             - Lenses
             - Aparture Stop (x1)
             - Image Plane
+            - Telescope Tube
         """
         
         self.components.append(component)
@@ -216,7 +218,7 @@ class OpticalSystem(object):
         
         """
         Creates the map that will be read by the simulation later, as well as
-        the geometry object necessary for an absorbing aperture stop and an 
+        the geometry objects necessary for an absorbing aperture stop and an 
         image plane
         
         Inputs : 
@@ -231,8 +233,7 @@ class OpticalSystem(object):
         # Define the map size, so that the PML is outside of the working system
         epsilon_map = np.ones(((self.size_x + 2*dpml)*resolution+1, 
                                (self.size_y + 2*dpml)*resolution+1,
-                               (self.size_z + 2*dpml)*resolution+1)).astype('complex') 
-        
+                               (self.size_z + 2*dpml)*resolution+1))
                 
         #Goes through all the components to add them to the system
         for component in self.components:
@@ -321,17 +322,14 @@ class OpticalSystem(object):
             - radius : radius of the central bubble
             - nb_clusters : number of clusters per lens
             - nb_per_cluster : number of bubbles surrounding the main one in each
-            cluster
-            - r_factor : the factor by which the radii are multiplied, allows for the 
-            investigation of bubble size only
-
+            clusters
         Affects the self.permittivity_map object.
         """
 
         res = self.resolution
 
         #Function, given a radius, that returns the indices of the points within 
-        #the circle centered on (0,0)
+        #the circle centered on (0,0,0)
         def bubble(rad):
             bubble = []
             for k in range(-rad, rad+1):
@@ -371,7 +369,7 @@ class OpticalSystem(object):
                     #The center of the bubble can be anywhere on the y axis
                     y0 = np.random.randint(low = low, high = high)
 
-                    #The center of the bubble must be in the lens
+                    #The center of the bubble must be in the radius the lens
                     max_z  = np.sqrt((D*0.8*res/2)**2 - (y0-middle_y*res)**2)
                     high_z = np.int(np.around(middle_z*res + max_z))
                     low_z  = np.int(np.around(middle_z*res - max_z))
@@ -392,8 +390,9 @@ class OpticalSystem(object):
 
                     #The center of the cluster has to be inside the lens
                     x0 = np.random.randint(low = x_left, high = x_right+1)
+                    #x_right + 1 so that low != high
 
-                    #Radius of the main can vary by 10 percent
+                    #Radius of the main bubble can vary by 10 percent
                     radius_0 = radius*(0.9 + np.random.random()*0.2)
                 
                     #Update lists
@@ -409,7 +408,7 @@ class OpticalSystem(object):
                         phi = np.random.random()*2*np.pi
                         r = radius_0*(1 + np.random.random()*3)
 
-                        #change of variables
+                        #Change of variables
                         x_k = np.int(np.around(r*np.cos(phi)*np.sin(theta)*res))
                         y_k = np.int(np.around(r*np.sin(phi)*np.sin(theta)*res))
                         z_k = np.int(np.around(r*np.cos(theta)*res))
@@ -435,7 +434,8 @@ class OpticalSystem(object):
 
         #Update the map
         for index in list_all : 
-            self.permittivity_map[index[0], index[1], index[2]] = 1
+            self.permittivity_map[index[0], index[1], index[2]] = 1 
+            #Permittivity of air is 1
 
     def add_tube(self, component):
         c1 = mp.Block(size=mp.Vector3(self.size_x, 
@@ -510,8 +510,7 @@ class OpticalSystem(object):
         
     def write_h5file(self):
         #Writes the file that will then be read within the sim function
-        
-        #rank = MPI.COMM_WORLD.rank
+        #If not running parallel, remove : 'w', driver ='mpio', comm=MPI.COMM_WORLD) 
 
         h = h5py.File('epsilon_map3D.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('eps', data=self.permittivity_map)
@@ -555,8 +554,7 @@ class AsphericLens(object):
                  delam_thick = 0,
                  delam_width = 10,
                  radial_slope = 0,
-                 axial_slope = 0,
-                 therm_def = False):
+                 axial_slope = 0):
         
         self.name = name                #NAME OF LENS  
         self.r1 = r1                    #LEFT SURFACE RADIUS
@@ -578,21 +576,6 @@ class AsphericLens(object):
         self.radial_slope = radial_slope#RADIAL GRADIENT IN THE INDEX
         self.axial_slope = axial_slope  #AXIAL GRADIENT IN THE INDEX
 
-        self.therm_def = therm_def      #ENABLES THERMAL DEFORMATION
-
-        deform = []
-
-        with open('deformedsurface.csv') as csvfile:
-            reader = csv.reader(csvfile, delimiter=',')
-            k = 0
-            for row in reader:
-                k+= 1 
-                if k>=11 :
-                    deform.append(np.float(row[2]))
-
-        deform0 = 2*deform[0]-deform[1]
-        deform.insert(0, deform0)
-        self.deform = deform
 
     
     def left_surface(self, rho):
@@ -610,6 +593,7 @@ class AsphericLens(object):
             Sag at at distance y from optical axis.
 
         """
+
         if rho <= self.diameter/2 : 
         
             if self.r1 != np.inf :
@@ -764,6 +748,8 @@ class Sim(object):
             x-size of the source. The default is 0.
         size_y : FLOAT, optional
             y-size of the source. The default is 300.
+        size_z : FLOAT, optional
+            z-size of the source. The default is 300.
         beam_width : FLOAT, optional
             For a gaussian beam, defines its width. The default is 0.
         focus_pt_x : FLOAT, optional
@@ -792,7 +778,6 @@ class Sim(object):
         #Its easier for the user to define the system such that x=0 is the 
         #plane on the left and not the center of the cell, this allows for that :
         x_meep = x - self.opt_sys.size_x/2
-        y_meep = y
         
         #Defines these objects so that they can be sued outside of the 
         #function later :
@@ -807,13 +792,13 @@ class Sim(object):
         if sourcetype == 'Plane wave':
             self.source = [mp.Source(mp.ContinuousSource(frequency, is_integrated=True),
                            component=mp.Ez,
-                           center=mp.Vector3(x_meep, y_meep, z),
+                           center=mp.Vector3(x_meep, y, z),
                            size=mp.Vector3(size_x, size_y, size_z))]
         
         elif sourcetype == 'Gaussian beam':
             self.source = [mp.GaussianBeamSource(mp.ContinuousSource(frequency),
                       component = mp.Ez,
-                      center = mp.Vector3(self.opt_sys.image_plane_pos-2, y_meep, z),
+                      center = mp.Vector3(self.opt_sys.image_plane_pos-2, y, z),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y, focus_pt_z),
                       beam_kdir = mp.Vector3(-1, 0, 0),
                       beam_w0 = beam_width,
@@ -882,11 +867,9 @@ class Sim(object):
                     boundary_layers=self.pml_layers,
                     geometry=self.opt_sys.geometry, 
                     sources=self.source,
-                    resolution=self.sim_resolution)
-                    #epsilon_input_file = 'epsilon_map3D.h5:eps')     
+                    resolution=self.sim_resolution,
+                    epsilon_input_file = 'epsilon_map3D.h5:eps')     
         
-        #n2f_obj = self.sim.add_near2far(self.frequency, 0, 1, mp.Near2FarRegion(center=mp.Vector3(-390), size=mp.Vector3(y=200)))
-
         #Runs the sim
         self.sim.run(until = runtime)
 
@@ -910,11 +893,8 @@ class Sim(object):
         pml[-dpml_res: , :] = 1
         plt.figure(figsize = (12,12))
         plt.imshow(eps_data.transpose(), 
-            #alpha = 0.5, 
             extent = (0,self.opt_sys.size_x+2*self.dpml,0,self.opt_sys.size_y+2*self.dpml))
-        #plt.imshow(self.opt_sys.permittivity_map[:,:,mid_z].transpose(), 
-        #    alpha = 0.5, 
-        #    extent = (0,self.opt_sys.size_x+2*self.dpml,0,self.opt_sys.size_y+2*self.dpml))
+
         #plt.imshow(pml, cmap = 'Purples', alpha = 0.4)
         plt.xlabel('x times resolution')
         plt.ylabel('y times resolution')
@@ -931,12 +911,23 @@ class Sim(object):
         ez_data = self.sim.get_array(center=mp.Vector3(0,0,0), 
             size=mp.Vector3(self.opt_sys.size_x, self.opt_sys.size_y,  0), 
             component=mp.Ez)
+        ey_data = self.sim.get_array(center=mp.Vector3(0,0,0), 
+            size=mp.Vector3(self.opt_sys.size_x, self.opt_sys.size_y,  0), 
+            component=mp.Ey)
         plt.figure(figsize = (20,20))
         plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary')
         plt.imshow(ez_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9)
         plt.xlabel('x times resolution')
         plt.ylabel('y times resolution')
-        plt.savefig('{}/efield'.format(path))
+        plt.savefig('{}/ez_field'.format(path))
+        plt.show()
+
+        plt.figure(figsize = (20,20))
+        plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary')
+        plt.imshow(ey_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9)
+        plt.xlabel('x times resolution')
+        plt.ylabel('y times resolution')
+        plt.savefig('{}/ey_field'.format(path))
         plt.show()
 
 
@@ -1259,14 +1250,14 @@ if __name__ == '__main__':
 
     opt_sys.add_component(lens1)
     opt_sys.add_component(lens2)
-    opt_sys.add_component(tube)
+    #opt_sys.add_component(tube)
 
     opt_sys.add_component(aperture_stop)
     opt_sys.add_component(image_plane)
     print(opt_sys.list_components())
     #opt_sys.sys_info(frequency = 0.5)
     
-    wavelength = 16
+    wavelength = 10
     dpml = 5
 
     
@@ -1275,15 +1266,28 @@ if __name__ == '__main__':
     opt_sys.plot_lenses()
     opt_sys.write_h5file()
 
-    opt_sys.add_tube(tube)
+    #opt_sys.add_tube(tube)
 
+    eps_0 = 1.2**2
+    eps_e = 1.7**2
+
+    diag = mp.Vector3(eps_0, (eps_0+eps_e)/2, (eps_0+eps_e)/2)
+    offdiag = mp.Vector3(0,0, (eps_e-eps_0)/2)
+
+
+    HWP = mp.Block(center = mp.Vector3(-320, 0, 0),
+              size = mp.Vector3(10, 300, 300),
+              material = mp.Medium(epsilon_diag = diag, 
+                                    epsilon_offdiag = offdiag))
+    opt_sys.geometry.append(HWP)
   
     sim = Sim(opt_sys)
-    sim.define_source(wavelength = 10, sourcetype = 'Gaussian beam', 
-                     x = 5, y = 0, size_x = 0, size_y = 300, size_z = 300, beam_width = 10)
-    sim.run_sim(runtime = 600, sim_resolution = 0.5)
+    sim.define_source(wavelength = wavelength, sourcetype = 'Gaussian beam', 
+                     x = 720, y = 0, size_x = 0, size_y = 300, size_z = 300, beam_width = 10)
+    sim.run_sim(runtime = 850, sim_resolution = 1)
     sim.plot_system()
     sim.plot_efield()
+
     #sim.plot_beam()
 
     """

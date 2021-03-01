@@ -331,14 +331,19 @@ def main():
         pouet = np.hstack((fft_dB, np.transpose([fft_dB[:,0]])))
         fft_test = np.vstack((pouet, [pouet[0,:]]))
 
-        c = ax.contourf(X,Y,fft_test, cmap=plt.get_cmap('viridis'),levels=np.linspace(-25,10,50))#, vmin = -10, vmax = 10)
+        middle_idx = np.int(len(fft_dB)/2)
+        fft_dB2 = np.concatenate((fft_dB[middle_idx:,:], fft_dB[:middle_idx,:]), axis = 0)
+        fft_reshaped = np.concatenate((fft_dB2[:, middle_idx:], fft_dB2[:, :middle_idx]), axis = 1)
+
+        im = ax.imshow(fft_reshaped, vmin = -1, vmax = 1)
+        #c = ax.contourf(X,Y,fft_test, cmap=plt.get_cmap('viridis'))#, vmin = -10, vmax = 10)
 
         ax.set_xlabel('Angle [deg]')
         ax.set_ylabel('Angle [deg]')
         ax.set_title('Difference')
 
-        cbar = plt.colorbar(c,fraction=0.046, pad=0.04)
-        cbar.ax.set_xlabel('Power [dB]')
+        cbar = plt.colorbar(im,fraction=0.046, pad=0.04)
+        #cbar.ax.set_xlabel('Power [dB]')
 
         #ax.set_xlim((-15,15))
         #ax.set_ylim((-15,15))
