@@ -1,4 +1,4 @@
-from meep_optics import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, Sim, Analysis
+from meep_optics import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, TelescopeTube, Sim, Analysis
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse as ap
@@ -39,6 +39,8 @@ image_plane = ImagePlane(name = 'Image Plane',
                          n_refr = 1.1, 
                          conductivity = 0.01)
 
+tube = TelescopeTube('Tube')
+
 
 
 def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml, 
@@ -49,6 +51,7 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml,
     opt_sys.add_component(lens2)
     opt_sys.add_component(aperture_stop)
     opt_sys.add_component(image_plane)
+    opt_sys.add_component(tube)
     opt_sys.assemble_system(dpml = dpml, resolution = res)
     if bub_radius>0 and bub_nb >0 and r_factor >0:
         opt_sys.make_lens_bubbles(bub_radius, bub_nb, 15, r_factor = r_factor)
@@ -92,7 +95,7 @@ def main():
 
     if args.wvl_analysis :
         
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
 
 
         opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, res = args.resolution, dpml = dpml)
@@ -101,6 +104,8 @@ def main():
 
         analysis.image_plane_beams(wavelength = args.wvl, fwidth = 0, sourcetype='Gaussian beam',
                                     y_max = 100, Nb_sources = args.beam_nb, sim_resolution = args.resolution) 
+
+        analysis.sim.plot_system()
 
         freq, fft = analysis.beam_FT(aperture_size = 200, precision_factor = 15)
         degrees = np.arctan(freq*args.wvl)*180/np.pi
@@ -118,7 +123,7 @@ def main():
 
 
     if args.thermal_def :
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
         fft = []
         beam_solid_angle = []
 
@@ -156,7 +161,7 @@ def main():
         h.close()
 
     if args.bubbles :
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
         fft = []
         beam_solid_angle = []
 
@@ -165,7 +170,7 @@ def main():
             for i in range(len(args.bubbles_nb)):
 
             
-                bub_nb = np.int(args.bubbles_nb[i])
+                bub_nb = int(args.bubbles_nb[i])
             
                 if k == 1 :
                     opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, res = args.resolution, dpml = dpml,
@@ -202,7 +207,7 @@ def main():
         h.close()
 
     if args.gradient: 
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
         fft = []
 
         for k in range(len(args.radial_grad)):
@@ -243,7 +248,7 @@ def main():
         h.close()
 
     if args.AR_analysis : 
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
         fft = []
 
         for k in range(len(args.AR_thick)):
@@ -287,7 +292,7 @@ def main():
         h.close()
 
     if args.index_anal :
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
         fft = []
 
         for k in range(len(args.lens_idx)):
@@ -338,6 +343,7 @@ def main():
         legend = ['1mm', '0.5mm', 'No bubbles']
         legend = ['No defects', 'Therm. deform.']
         legend = ['+2 $\%$ change', '0 $\%$ change', '-2 $\%$ change']
+        legend = ['10mm with tube']
         
         
         def gaussian(x, stddev, mean):

@@ -236,6 +236,37 @@ class OpticalSystem(object):
                 else :
                     self.geometry = [c1]
                 
+            elif component.object_type == 'TelescopeTube':
+
+                #The aperture can be done with 2 blocks in 2D, as follows :
+                c1 = mp.Block(size=mp.Vector3(self.size_x, 2, 0),
+                      center=mp.Vector3(0, 150+3, 0),
+                      material = mp.metal)
+                
+                c2 = mp.Block(size=mp.Vector3(self.size_x, 2, 0),
+                      center=mp.Vector3(0, 150+1, 0),               
+                      material = mp.Medium(epsilon=2, D_conductivity=100))
+
+                c3 = mp.Block(size=mp.Vector3(self.size_x, 2, 0),
+                      center=mp.Vector3(0, -150-3, 0),
+                      material = mp.metal)
+                
+                c4 = mp.Block(size=mp.Vector3(self.size_x, 2, 0),
+                      center=mp.Vector3(0, -150-1, 0),               
+                      material = mp.Medium(epsilon=2, D_conductivity=100))
+
+                
+                if self.geometry is not None :
+                    #If there are already objects in geometry, adds the aperture
+                    #instead of replacing what was there
+                    
+                    self.geometry.append(c1)
+                    self.geometry.append(c2)
+                    self.geometry.append(c3)
+                    self.geometry.append(c4)
+                    
+                else :
+                    self.geometry = [c1,c2, c3, c4]
             
         self.permittivity_map = epsilon_map
 
@@ -389,6 +420,11 @@ class OpticalSystem(object):
                                                         self.size_y/wavelength))
 
 
+class TelescopeTube(object):
+    def __init__(self, name =''):
+
+        self.name = name
+        self.object_type = 'TelescopeTube'
                 
 class AsphericLens(object):
     """
@@ -434,16 +470,16 @@ class AsphericLens(object):
 
         deform = []
 
-        with open('deformedsurface.csv') as csvfile:
-            reader = csv.reader(csvfile, delimiter=',')
-            k = 0
-            for row in reader:
-                k+= 1 
-                if k>=11 :
-                    deform.append(np.float(row[2]))
+        #with open('deformedsurface.csv') as csvfile:
+        #    reader = csv.reader(csvfile, delimiter=',')
+        #    k = 0
+        #    for row in reader:
+        #        k+= 1 
+        #        if k>=11 :
+        #            deform.append(np.float(row[2]))
 
-        deform0 = 2*deform[0]-deform[1]
-        deform.insert(0, deform0)
+        #deform0 = 2*deform[0]-deform[1]
+        #deform.insert(0, deform0)
         self.deform = deform
 
     
@@ -492,13 +528,12 @@ class AsphericLens(object):
 
 
     def thermal_deformation(self, y):
-
-        
-        x = np.linspace(0,300, len(self.deform))
-
-        interp_surf = np.interp(y, x, self.deform)
-
+ 
         if self.therm_def :
+            x = np.linspace(0,300, len(self.deform))
+
+            interp_surf = np.interp(y, x, self.deform)
+
             return interp_surf
 
         else :
@@ -748,7 +783,8 @@ class Sim(object):
         plt.imshow(pml, cmap = 'Purples', alpha = 0.4)
         plt.xlabel('x times resolution')
         plt.ylabel('y times resolution')
-        plt.show()
+        plt.savefig('2Dsystem')
+        plt.close()
     
     def plot_efield(self, path = '.', comp = 'Ez') :
 
