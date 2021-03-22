@@ -83,11 +83,21 @@ class OpticalSystem(object):
         y0_left = np.random.randint(low = -high, high = high)
         y0_right = np.random.randint(low = -high, high = high)
 
-        for y_res in range(mid_y) :           
+        radius = np.int(component.diameter*resolution/2)
+
+        surf_err_width = 1
+        surf_err_scale = 0.1  
+        nb_bins = int(component.diameter/surf_err_width)
+        err_left = np.around(np.random.normal(scale = surf_err_scale*resolution, size = nb_bins))
+        err_right = np.around(np.random.normal(scale = surf_err_scale*resolution, size = nb_bins))
+        
+
+        for y_res in range(radius) :           
             
             #Left surface sag
             x_left = np.int(np.around((
                         component.left_surface(y_res/resolution) + self.dpml + 
+                        err[int(np.around(y_res/resolution/surf_err_width))] + 
                         component.x - component.thermal_deformation((y_res+mid_y)/resolution))*resolution))
             #Right surface sag       
             x_right = np.int(np.around((
@@ -120,24 +130,38 @@ class OpticalSystem(object):
             material_line = [n0 + y_res*radial_slope + (k-x0)*axial_slope for k in x_range]
 
 
+            #Surface error
+            err_left_pos = int(err_left[int(np.around(y_res/resolution/surf_err_width))])
+            err_left_neg = int(err_left[- int(np.around(y_res/resolution/surf_err_width))])
+
+            err_right_pos = int(err_left[int(np.around(y_res/resolution/surf_err_width))]) 
+            err_right_neg = int(err_left[- int(np.around(y_res/resolution/surf_err_width))])
+
+            x_left_neg = x_left + err_left_neg
+            x_left_pos = x_left + err_left_pos
+
+            x_right_neg = x_right + err_right_neg
+            x_right_pos = x_right + err_right_pos
+
+
             #Write lens between left and right surface below optical axis
-            epsilon_map[x_left:x_right+1, y_negative] *= material_line
+            epsilon_map[x_left_neg : x_right_neg+1, y_negative] *= material_line
             
             #So that the center line is not affected twice :
             if y_res != 0 :
                 #Write lens between left and right surface above optical axis
-                epsilon_map[x_left:x_right+1, y_positive] *= material_line
+                epsilon_map[x_left_pos : x_right_pos+1, y_positive] *= material_line
             
             #Write AR coating on left surface
             if component.AR_left is not None :
 
                 AR_thick = np.int(np.around(component.AR_left*resolution))
 
-                epsilon_map[x_left - AR_thick - delam_neg_L: x_left - delam_neg_L, 
+                epsilon_map[x_left_neg - AR_thick - delam_neg_L: x_left_neg - delam_neg_L, 
                             y_negative] *= component.AR_material
 
                 if y_res != 0 :
-                    epsilon_map[x_left - AR_thick - delam_pos_L: x_left - delam_pos_L, 
+                    epsilon_map[x_left_pos - AR_thick - delam_pos_L: x_left_pos - delam_pos_L, 
                                 y_positive] *= component.AR_material
             
             #Write AR coating on right surface                    
@@ -145,11 +169,11 @@ class OpticalSystem(object):
                 
                 AR_thick = np.int(np.around(component.AR_right*resolution))
 
-                epsilon_map[x_right + 1 + delam_neg_R: AR_thick + x_right + 1 + delam_neg_R, 
+                epsilon_map[x_right_neg + 1 + delam_neg_R: AR_thick + x_right_neg + 1 + delam_neg_R, 
                             y_negative] *= component.AR_material
 
                 if y_res != 0 :
-                    epsilon_map[x_right + 1 + delam_pos_R: AR_thick + x_right + 1 + delam_pos_R, 
+                    epsilon_map[x_right_pos + 1 + delam_pos_R: AR_thick + x_right_pos + 1 + delam_pos_R, 
                                 y_positive] *= component.AR_material
             
             
@@ -172,7 +196,7 @@ class OpticalSystem(object):
         
         # Define the map size, so that the PML is outside of the working system
         epsilon_map = np.ones(((self.size_x + 2*dpml)*resolution+1, 
-                               (self.size_y + 2*dpml)*resolution+1)) 
+                               (self.size_y + 2*dpml)*resolution+1), dtype = 'float32') 
         
                 
         #Goes through all the components to add them to the system
@@ -236,37 +260,84 @@ class OpticalSystem(object):
                 else :
                     self.geometry = [c1]
                 
-            elif component.object_type == 'TelescopeTube':
+            elif component.object_type == 'MetallicTube':
 
                 #The aperture can be done with 2 blocks in 2D, as follows :
-                c1 = mp.Block(size=mp.Vector3(self.size_x, 2, 0),
-                      center=mp.Vector3(0, 150+3, 0),
+                c1 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
+                      center=mp.Vector3(0, 157.5, 0),
                       material = mp.metal)
                 
-                c2 = mp.Block(size=mp.Vector3(self.size_x, 2, 0),
-                      center=mp.Vector3(0, 150+1, 0),               
-                      material = mp.Medium(epsilon=2, D_conductivity=100))
-
-                c3 = mp.Block(size=mp.Vector3(self.size_x, 2, 0),
-                      center=mp.Vector3(0, -150-3, 0),
+                c3 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
+                      center=mp.Vector3(0, -157.5, 0),
                       material = mp.metal)
-                
-                c4 = mp.Block(size=mp.Vector3(self.size_x, 2, 0),
-                      center=mp.Vector3(0, -150-1, 0),               
-                      material = mp.Medium(epsilon=2, D_conductivity=100))
-
                 
                 if self.geometry is not None :
                     #If there are already objects in geometry, adds the aperture
                     #instead of replacing what was there
                     
                     self.geometry.append(c1)
-                    self.geometry.append(c2)
                     self.geometry.append(c3)
+                    
+                else :
+                    self.geometry = [c1, c3]
+
+            elif component.object_type == 'Absorber':
+                c2 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
+                      center=mp.Vector3(0, 152.5, 0),               
+                      material = mp.Medium(epsilon=3.5, D_conductivity=0.0987))
+
+
+                c4 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
+                      center=mp.Vector3(0, -152.5, 0),               
+                      material = mp.Medium(epsilon=3.5, D_conductivity=0.0987))
+
+                
+                if self.geometry is not None :
+                    #If there are already objects in geometry, adds the aperture
+                    #instead of replacing what was there
+                    
+                    self.geometry.append(c2)
                     self.geometry.append(c4)
                     
                 else :
-                    self.geometry = [c1,c2, c3, c4]
+                    self.geometry = [c2, c4]
+
+            elif component.object_type == 'PrismsTube':
+
+                vertices_up = [mp.Vector3(-1.5,0),
+                            mp.Vector3(1.5,0),
+                            mp.Vector3(0,5)]
+
+                vertices_down = [mp.Vector3(-1.5,0),
+                            mp.Vector3(1.5,0),
+                            mp.Vector3(0,-5)]
+
+                
+                for k in range(250):
+
+                    prism_up = mp.Prism(vertices =vertices_up, 
+                                    center = mp.Vector3(-380+k*3, -155), 
+                                    material = mp.Medium(epsilon =1.5, D_conductivity = 10), 
+                                    height = 1)
+                    prism_down = mp.Prism(vertices =vertices_down, 
+                                    center = mp.Vector3(-380+k*3, 155), 
+                                    material = mp.Medium(epsilon =1.5, D_conductivity = 10), 
+                                    height = 1)
+
+                    self.geometry.append(prism_up)
+                    self.geometry.append(prism_down)
+
+                
+                c1 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
+                      center=mp.Vector3(0, 157.5, 0),
+                      material = mp.metal)
+                c2 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
+                      center=mp.Vector3(0, -157.5, 0),
+                      material = mp.metal)
+
+                self.geometry.append(c1)
+                self.geometry.append(c2)
+
             
         self.permittivity_map = epsilon_map
 
@@ -396,9 +467,19 @@ class OpticalSystem(object):
         
         #rank = MPI.COMM_WORLD.rank
 
-        h = h5py.File('epsilon_map.h5', 'w')#, driver ='mpio', comm=MPI.COMM_WORLD)
-        h.create_dataset('eps', data=self.permittivity_map)
+        comm = MPI.COMM_WORLD
+        rank = comm.rank
+
+        h = h5py.File('epsilon_map.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
+        #h = h5py.File('epsilon_map3D.h5', 'w')
+        size_x = len(self.permittivity_map[:,0])
+        size_y = len(self.permittivity_map[0,:])
+        dset = h.create_dataset('eps', (size_x, size_y), dtype = 'float32', compression = "gzip")
+        with dset.collective :
+            dset[:,:] = self.permittivity_map
+        
         h.close()
+        self.permittivity_map = 0
         
     def delete_h5file(self):
         #Deletes the h5 file, can be useful when the file is heavy and not to 
@@ -424,7 +505,15 @@ class TelescopeTube(object):
     def __init__(self, name =''):
 
         self.name = name
-        self.object_type = 'TelescopeTube'
+        self.object_type = 'MetallicTube'
+        #self.object_type = 'PrismsTube'
+
+class Absorber(object):
+    def __init__(self, name =''):
+
+        self.name = name
+        self.object_type = 'Absorber'
+        #self.object_type = 'PrismsTube'
                 
 class AsphericLens(object):
     """
@@ -433,7 +522,8 @@ class AsphericLens(object):
     the permitttivity map
     """
     
-    def __init__(self, name = '', 
+    def __init__(self, name = '',
+                diameter = 300, 
                  r1=None, r2=None, 
                  c1=None, c2=None, 
                  thick=None, 
@@ -447,6 +537,7 @@ class AsphericLens(object):
                  therm_def = False):
         
         self.name = name                #NAME OF LENS  
+        self.diameter = diameter        #DIAM
         self.r1 = r1                    #LEFT SURFACE RADIUS
         self.r2 = r2                    #RIGHT SURFACE RADIUS
         self.c1 = c1                    #LEFT SURFACE ASPHERIC PARAMETER
@@ -691,7 +782,7 @@ class Sim(object):
                       center = mp.Vector3(self.opt_sys.image_plane_pos-2, y_meep, 0),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y),
                       beam_kdir = mp.Vector3(-1, 0),
-                      beam_w0 = beam_width,
+                      beam_w0 = self.opt_sys.size_y,
                       beam_E0 = mp.Vector3(0,0,1),
                       size=mp.Vector3(size_x, size_y, 0))]
             
