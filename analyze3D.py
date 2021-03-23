@@ -1,5 +1,5 @@
-from meep_optics3D import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, TelescopeTube, Sim, Analysis
 import numpy as np
+from meep_optics3D import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, TelescopeTube, Sim, Analysis
 import matplotlib.pyplot as plt
 import argparse as ap
 import h5py
@@ -59,6 +59,7 @@ tube = TelescopeTube(name = 'Tube',
 
 def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml, 
                     bub_radius = 0, bub_nb = 4, r_factor = 1):
+    
     opt_sys = OpticalSystem('test')
     opt_sys.set_size(800,300,300)
     opt_sys.add_component(lens1)
@@ -69,12 +70,13 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml,
     if res < 1 :
         res = 1
     else :
-        res = np.int(res)
+        res = int(res)
+
     opt_sys.assemble_system(dpml = dpml, resolution = res)
-    if bub_radius>0 and bub_nb >0 and r_factor >0:
-        opt_sys.make_lens_bubbles(bub_radius, bub_nb, 15)
+    #if bub_radius>0 and bub_nb >0 and r_factor >0:
+    #    opt_sys.make_lens_bubbles(bub_radius, bub_nb, 15)
     opt_sys.write_h5file()
-    
+    print('WritingH5Complete')
     return opt_sys
 
 
@@ -114,7 +116,7 @@ def main():
 
     if args.runsim :
         
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
 
 
         opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, res = args.resolution, dpml = dpml)
@@ -124,9 +126,10 @@ def main():
         analysis.image_plane_beams(wavelength = args.wvl, fwidth = 0, sourcetype='Gaussian beam',
                                     y_max = 100, Nb_sources = args.beam_nb, sim_resolution = args.resolution) 
 
+        analysis.sim.plot_system()
         freq, fft = analysis.beam_FT(aperture_size = 200, precision_factor = 15)
         degrees = np.arctan(freq*args.wvl)*180/np.pi
-
+        opt_sys.delete_h5file()
         name = '3DFFT_data/' + args.file_name + '.h5'
 
         h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
@@ -135,7 +138,7 @@ def main():
         h.close()
 
     if args.gradient: 
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
         fft = []
 
         for k in range(len(args.radial_grad)):
@@ -158,7 +161,7 @@ def main():
 
                 freq, fft_k = analysis.beam_FT(aperture_size = 200, precision_factor = 15)
                 fft.append(fft_k[0])
-
+                opt_sys.delete_h5file() 
                 degrees = np.arctan(freq*args.wvl)*180/np.pi
 
         fft = np.array(fft)
@@ -171,7 +174,7 @@ def main():
         h.close()
 
     if args.delam_analysis : 
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
         fft = []
         ar_thick = np.float(args.AR_thick[0])
         lens1.AR_left = ar_thick
@@ -194,7 +197,7 @@ def main():
 
             freq, fft_k = analysis.beam_FT(aperture_size = 200, precision_factor = 11)
             fft.append(fft_k[0])
-
+            opt_sys.delete_h5file() 
             degrees = np.arctan(freq*args.wvl)*180/np.pi
         fft = np.array(fft)
         
@@ -209,7 +212,7 @@ def main():
         h.close()
 
     if args.bubbles :
-        dpml = max(np.int(np.around(args.wvl/2)), 1)
+        dpml = max(int(np.around(args.wvl/2)), 1)
         fft = []
         beam_solid_angle = []
 
@@ -218,7 +221,7 @@ def main():
             for i in range(len(args.bubbles_nb)):
 
             
-                bub_nb = np.int(args.bubbles_nb[i])
+                bub_nb = int(args.bubbles_nb[i])
             
                 opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, res = args.resolution, dpml = dpml,
                                             bub_radius = bub_radius, bub_nb = bub_nb)
@@ -232,7 +235,7 @@ def main():
 
                 freq, fft_k = analysis.beam_FT(aperture_size = 200, precision_factor = 15)
                 fft.append(fft_k[0])
-
+                opt_sys.delete_h5file() 
                 degrees = np.arctan(freq*args.wvl)*180/np.pi
 
         fft = np.array(fft)
@@ -263,7 +266,7 @@ def main():
 
             fft_dB = 10*np.log10(np.abs(fft[k]))
 
-            middle_idx = np.int(len(deg)/2)
+            middle_idx = int(len(deg)/2)
             deg_reordered = np.sort(degrees)
 
 
@@ -331,7 +334,7 @@ def main():
         pouet = np.hstack((fft_dB, np.transpose([fft_dB[:,0]])))
         fft_test = np.vstack((pouet, [pouet[0,:]]))
 
-        middle_idx = np.int(len(fft_dB)/2)
+        middle_idx = int(len(fft_dB)/2)
         fft_dB2 = np.concatenate((fft_dB[middle_idx:,:], fft_dB[:middle_idx,:]), axis = 0)
         fft_reshaped = np.concatenate((fft_dB2[:, middle_idx:], fft_dB2[:, :middle_idx]), axis = 1)
 

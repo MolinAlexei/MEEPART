@@ -97,7 +97,6 @@ class OpticalSystem(object):
             #Left surface sag
             x_left = np.int(np.around((
                         component.left_surface(y_res/resolution) + self.dpml + 
-                        err[int(np.around(y_res/resolution/surf_err_width))] + 
                         component.x - component.thermal_deformation((y_res+mid_y)/resolution))*resolution))
             #Right surface sag       
             x_right = np.int(np.around((
@@ -263,12 +262,12 @@ class OpticalSystem(object):
             elif component.object_type == 'MetallicTube':
 
                 #The aperture can be done with 2 blocks in 2D, as follows :
-                c1 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
-                      center=mp.Vector3(0, 157.5, 0),
+                c1 = mp.Block(size=mp.Vector3(self.size_x, component.thick, 0),
+                      center=mp.Vector3(0, component.center, 0),
                       material = mp.metal)
                 
-                c3 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
-                      center=mp.Vector3(0, -157.5, 0),
+                c3 = mp.Block(size=mp.Vector3(self.size_x, component.thick, 0),
+                      center=mp.Vector3(0, -component.center, 0),
                       material = mp.metal)
                 
                 if self.geometry is not None :
@@ -282,14 +281,16 @@ class OpticalSystem(object):
                     self.geometry = [c1, c3]
 
             elif component.object_type == 'Absorber':
-                c2 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
-                      center=mp.Vector3(0, 152.5, 0),               
-                      material = mp.Medium(epsilon=3.5, D_conductivity=0.0987))
+                c2 = mp.Block(size=mp.Vector3(self.size_x, component.thick, 0),
+                      center=mp.Vector3(0, component.center, 0),               
+                      material = mp.Medium(epsilon=component.epsilon_real, 
+                                            D_conductivity=component.conductivity))
 
 
-                c4 = mp.Block(size=mp.Vector3(self.size_x, 5, 0),
-                      center=mp.Vector3(0, -152.5, 0),               
-                      material = mp.Medium(epsilon=3.5, D_conductivity=0.0987))
+                c4 = mp.Block(size=mp.Vector3(self.size_x, component.thick, 0),
+                      center=mp.Vector3(0, -component.center, 0),               
+                      material = mp.Medium(epsilon=component.epsilon_real, 
+                                            D_conductivity=component.conductivity))
 
                 
                 if self.geometry is not None :
@@ -502,19 +503,30 @@ class OpticalSystem(object):
 
 
 class TelescopeTube(object):
-    def __init__(self, name =''):
+    def __init__(self, name ='', thick = 5, center = 157.5):
 
-        self.name = name
-        self.object_type = 'MetallicTube'
-        #self.object_type = 'PrismsTube'
+        self.name = name                        #NAME OF OBJECT
+        self.object_type = 'MetallicTube'       #OBJECT TYPE
+        self.thick = thick                      #TUBE THICKNESS
+        self.center = center                    #DISTANCE OF CENTER FROM OPTICAL AXIS
+
 
 class Absorber(object):
-    def __init__(self, name =''):
+    def __init__(self, name ='', thick = 5, center = 157.5,
+                epsilon_real = 3.5, epsilon_imag = 0.11025, freq = 1/3):
 
-        self.name = name
-        self.object_type = 'Absorber'
-        #self.object_type = 'PrismsTube'
-                
+        self.name = name                        #NAME OF OBJECT
+        self.object_type = 'Absorber'           #OBJECT TYPE
+        self.thick = thick                      #TUBE THICKNESS
+        self.center = center                    #DISTANCE OF CENTER FROM OPTICAL AXIS
+        self.epsilon_real = eps_real            #REAL PART OF PERMITTIVITY
+        self.epsilon_imag = eps_imag            #COMPLEX PART OF PERMITTIVITY
+        self.freq = freq                        #OPERATING FREQUENCY
+        self.conductivity = eps_imag*2*np.pi*freq/eps_real #CONDUCTIVITY FOR MEEP
+
+
+        #ECCOSORB CR110 @ 100 GHz : eps_real = 3.5, eps_imag = 0.11025, freq = 1/3
+
 class AsphericLens(object):
     """
     This class is used to define an aspheric lens of arbitrary shape and 

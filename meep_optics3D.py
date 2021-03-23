@@ -231,9 +231,12 @@ class OpticalSystem(object):
         self.dpml = dpml
         
         # Define the map size, so that the PML is outside of the working system
-        epsilon_map = np.ones(((self.size_x + 2*dpml)*resolution+1, 
-                               (self.size_y + 2*dpml)*resolution+1,
-                               (self.size_z + 2*dpml)*resolution+1))
+        shape_x = (self.size_x + 2*dpml)*resolution+1
+        shape_y = (self.size_y + 2*dpml)*resolution+1
+        shape_z = (self.size_z + 2*dpml)*resolution+1
+
+        epsilon_map = np.ones((shape_x, shape_y, shape_z), dtype = 'float32')
+        #epsilon_map = [0,0,0]
                 
         #Goes through all the components to add them to the system
         for component in self.components:
@@ -309,6 +312,12 @@ class OpticalSystem(object):
                 
             
         self.permittivity_map = epsilon_map
+
+        #h = h5py.File('epsilon_map3D.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
+        #dset = h.create_dataset('eps', (shape_x, shape_y, shape_z), dtype = 'float32')
+        #with dset.collective :
+        #    dset[:,:,:] = epsilon_map
+        #h.close()
 
 
     def make_lens_bubbles(self, radius, nb_clusters, nb_per_cluster):
@@ -452,7 +461,6 @@ class OpticalSystem(object):
                                         self.size_z-10),
                               
                       center=mp.Vector3(0, 0, 0),
-                      
                       material = mp.Medium(epsilon=1.2**2, 
                                            D_conductivity = 100))
                 #R2 = (component.diameter*resolution/2)**2
@@ -512,16 +520,27 @@ class OpticalSystem(object):
         #Writes the file that will then be read within the sim function
         #If not running parallel, remove : 'w', driver ='mpio', comm=MPI.COMM_WORLD) 
 
+        comm = MPI.COMM_WORLD
+        rank = comm.rank
+
         h = h5py.File('epsilon_map3D.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
-        h.create_dataset('eps', data=self.permittivity_map)
-        h.close()
+        #h = h5py.File('epsilon_map3D.h5', 'w')
+        size_x = len(self.permittivity_map[:,0,0])
+        size_y = len(self.permittivity_map[0,:,0])
+        size_z = len(self.permittivity_map[0,0,:])
+        dset = h.create_dataset('eps', (size_x, size_y, size_z), dtype = 'float32', compression = "gzip")
+        with dset.collective :
+            dset[:,:,:] = self.permittivity_map
         
+        h.close()
+        self.permittivity_map = 0
+
     def delete_h5file(self):
         #Deletes the h5 file, can be useful when the file is heavy and not to 
         #be kept after simulation
         
         file = glob.glob('epsilon_map3D.h5')
-        os.remove(file[0])
+        #os.remove(file)
         
     def sys_info(self, wavelength = None, frequency = None):
 
@@ -535,6 +554,18 @@ class OpticalSystem(object):
         print('System size = {} x {} wavelengths'.format(self.size_x/wavelength, 
                                                         self.size_y/wavelength))
 
+    def material_function(self, x, y, z):
+
+        dpml = self.dpml
+        for component in self.components:
+
+            if component.name == 'Lens 1' and x <350:
+                
+                return component.obj_func(x, y, z, dpml)
+
+            elif component.name == 'Lens 2' and x>=350 :
+
+                return component.obj_func(x, y, z, dpml)
 
                 
 class AsphericLens(object):
@@ -564,6 +595,7 @@ class AsphericLens(object):
         self.thick = thick              #THICKNESS AT CENTER
         self.x = x                      #X POSITION OF LEFT SURFACE CENTER
         self.diameter = diameter        #DIAMETER OF THE LENS
+        self.radius = diameter/2        #RADIUS SQUARED
         self.material = n_refr**2       #DIELECTRIC PERMITTIVITY
         self.object_type = 'Lens'
 
@@ -631,6 +663,21 @@ class AsphericLens(object):
         lump = (((y-y0)/width)**2 + ((z-z0)/width)**2 - 2)*thick
 
         return np.abs(min((lump, 0)))
+
+    def obj_func(self, x, y,z, dpml):
+
+        rho = np.sqrt(y**2 + z**2)
+        left = self.left_surface(rho) + self.x + dpml
+        right = self.right_surface(rho) + self.x + dpml + self.thick
+
+        if rho < self.radius :
+            if x > left and x < right :
+                return mp.Medium(epsilon = self.material)
+
+            return mp.air
+
+        return mp.air
+
 
         
 
@@ -718,7 +765,9 @@ class Sim(object):
         
         self.pml_layers = [mp.PML(thickness = dpml)]
         self.cell = mp.Vector3(self.opt_sys.size_x+2*dpml, self.opt_sys.size_y+2*dpml, self.opt_sys.size_z+2*dpml)
-        
+
+    
+
     def define_source(self, frequency = None,
                       wavelength = None, 
                       sourcetype = 'Plane wave', 
@@ -727,6 +776,7 @@ class Sim(object):
                       beam_width = 0, 
                       focus_pt_x = 0, focus_pt_y = 0, focus_pt_z = 0,
                       fwidth = 0):
+
         """
         Defines the source to be used by the simulation. Only does one source
         at a time.
@@ -848,8 +898,7 @@ class Sim(object):
         None.
 
         """
-        
-        
+
         dpml = self.opt_sys.dpml
         
         if dpml is None :
@@ -861,6 +910,19 @@ class Sim(object):
         self.dpml = dpml
         self.sim_resolution = sim_resolution
 
+
+        ###Function of material
+        cell_middle = (self.opt_sys.size_x/2 + dpml)
+        def matfunc(P):
+            x = P.x + cell_middle
+            y = P.y
+            z = P.z 
+            return self.opt_sys.material_function(x, y, z)
+            #return mp.air
+
+        matfunc.do_averaging = True    
+        
+
         #Defines the simulation environment, using the various objects defined
         #previously
         self.sim = mp.Simulation(cell_size=self.cell,
@@ -868,8 +930,11 @@ class Sim(object):
                     geometry=self.opt_sys.geometry, 
                     sources=self.source,
                     resolution=self.sim_resolution,
-                    epsilon_input_file = 'epsilon_map3D.h5:eps')     
-        
+                    #subpixel_tol = 0.1,
+                    #subpixel_maxeval = 10,
+                    eps_averaging = False,
+                    material_function = matfunc)
+                    #epsilon_input_file = 'epsilon_map3D.h5:eps')     
         #Runs the sim
         self.sim.run(until = runtime)
 

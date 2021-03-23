@@ -1,9 +1,10 @@
-from meep_optics import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, TelescopeTube, Sim, Analysis
+from meep_optics import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, TelescopeTube, Absorber, Sim, Analysis
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse as ap
 import h5py
 from scipy import optimize
+from mpi4py import MPI
     
 lens1 = AsphericLens(name = 'Lens 1', 
                      r1 = 327.365, 
@@ -40,18 +41,26 @@ image_plane = ImagePlane(name = 'Image Plane',
                          conductivity = 0.01)
 
 tube = TelescopeTube('Tube')
+absorber = Absorber('Absorber')
 
 
 
 def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml, 
-                    bub_radius = 0, bub_nb = 4, r_factor = 1):
+                    bub_radius = 0, bub_nb = 0, r_factor = 0,
+                    telescope_tube = False,
+                    absorb = False):
     opt_sys = OpticalSystem('test')
-    opt_sys.set_size(800,300)
+    opt_sys.set_size(800,340)
     opt_sys.add_component(lens1)
     opt_sys.add_component(lens2)
     opt_sys.add_component(aperture_stop)
     opt_sys.add_component(image_plane)
-    opt_sys.add_component(tube)
+
+    if telescope_tube :
+        opt_sys.add_component(tube)
+    if absorb :
+        opt_sys.add_component(absorber)
+
     opt_sys.assemble_system(dpml = dpml, resolution = res)
     if bub_radius>0 and bub_nb >0 and r_factor >0:
         opt_sys.make_lens_bubbles(bub_radius, bub_nb, 15, r_factor = r_factor)
@@ -90,6 +99,7 @@ def main():
     parser.add_argument('--bubbles', dest= 'bubbles', action = 'store_true', default = False)
     parser.add_argument('--gradient', dest= 'gradient', action = 'store_true', default = False)
     parser.add_argument('--thermal_def', dest= 'thermal_def', action = 'store_true', default = False)
+    parser.add_argument('--tube', dest= 'tube', action = 'store_true', default = False)
 
     args = parser.parse_args()
 
@@ -114,13 +124,50 @@ def main():
 
         name = 'FFT_data/' + args.file_name + '.h5'
 
-        h = h5py.File(name, 'w')
+        h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('degrees', data=degrees)
         h.create_dataset('ffts', data=fft)
         h.create_dataset('fwhm_fft', data=[fwhm_fft])
         h.create_dataset('fwhm_ap', data=[fwhm_ap])
         h.close()
 
+    if args.tube :
+        dpml = max(int(np.around(args.wvl/2)), 1)
+        fft = []
+
+        is_tube = False
+        is_abs = False
+        for k in range(2):
+
+            if k==1 :
+                is_abs = False
+
+            opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, 
+                res = args.resolution, dpml = dpml, telescope_tube = is_tube, absorb = is_abs)
+
+            sim = Sim(opt_sys)
+            analysis = Analysis(sim)  
+            analysis.image_plane_beams(wavelength = args.wvl, fwidth = 0, sourcetype='Gaussian beam',
+                                    y_max = 100, Nb_sources = args.beam_nb, sim_resolution = args.resolution) 
+
+            freq, fft_k = analysis.beam_FT(aperture_size = 200, precision_factor = 15)
+            fft.append(fft_k[1].real)
+
+            analysis.sim.plot_efield()
+
+        fft = np.array(fft)
+        degrees = np.arctan(freq*args.wvl)*180/np.pi
+        fwhm_fft = analysis.FWHM_fft[0]
+        fwhm_ap = analysis.FWHM_ap[0]
+
+        name = 'FFT_data/' + args.file_name + '.h5'
+
+        h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
+        h.create_dataset('degrees', data=degrees)
+        h.create_dataset('ffts', data=fft)
+        h.create_dataset('fwhm_fft', data=[fwhm_fft])
+        h.create_dataset('fwhm_ap', data=[fwhm_ap])
+        h.close()
 
     if args.thermal_def :
         dpml = max(int(np.around(args.wvl/2)), 1)
@@ -153,7 +200,7 @@ def main():
 
         name = 'FFT_data/' + args.file_name + '.h5'
 
-        h = h5py.File(name, 'w')
+        h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('degrees', data=degrees)
         h.create_dataset('ffts', data=fft)
         h.create_dataset('fwhm_fft', data=[fwhm_fft])
@@ -199,7 +246,7 @@ def main():
 
         name = 'FFT_data/' + args.file_name + '.h5'
 
-        h = h5py.File(name, 'w')
+        h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('degrees', data=degrees)
         h.create_dataset('ffts', data=fft)
         h.create_dataset('fwhm_fft', data=[fwhm_fft])
@@ -240,7 +287,7 @@ def main():
 
         name = 'FFT_data/' + args.file_name + '.h5'
 
-        h = h5py.File(name, 'w')
+        h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('degrees', data=degrees)
         h.create_dataset('ffts', data=fft)
         h.create_dataset('fwhm_fft', data=[fwhm_fft])
@@ -284,7 +331,7 @@ def main():
 
         name = 'FFT_data/' + args.file_name + '.h5'
 
-        h = h5py.File(name, 'w')
+        h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('degrees', data=degrees)
         h.create_dataset('ffts', data=fft)
         h.create_dataset('fwhm_fft', data=[fwhm_fft])
@@ -317,7 +364,7 @@ def main():
 
         name = 'FFT_data/' + args.file_name + '.h5'
 
-        h = h5py.File(name, 'w')
+        h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('degrees', data=degrees)
         h.create_dataset('ffts', data=fft)
         h.create_dataset('fwhm_fft', data=[fwhm_fft])
@@ -325,7 +372,7 @@ def main():
         h.close()
 
 
-    elif args.plot_FT :
+    elif args.plot_FT:
 
         name = 'FFT_data/' + args.file_name + '.h5'
         data = h5py.File(name, 'r')
@@ -334,7 +381,8 @@ def main():
         fwhm_ap = data['fwhm_ap']
         fwhm_fft = data['fwhm_fft']
 
-        plt.figure(figsize = (8,6), )
+        deg = np.copy(degrees)
+        plt.figure(figsize = (8,6))
 
         
         legend = ['0mm', '0.5mm', '1.25mm','2.5mm']
@@ -343,7 +391,7 @@ def main():
         legend = ['1mm', '0.5mm', 'No bubbles']
         legend = ['No defects', 'Therm. deform.']
         legend = ['+2 $\%$ change', '0 $\%$ change', '-2 $\%$ change']
-        legend = ['10mm with tube']
+        legend = ['Without absorber', 'With absorber']
         
         
         def gaussian(x, stddev, mean):
@@ -354,7 +402,7 @@ def main():
             while degrees[i]<1 : 
                 i+=1
 
-            middle = np.int((len(fft[k])+1)/2)
+            middle = int((len(fft[k])+1)/2)
 
             fft_k = fft[k]
 
@@ -379,7 +427,7 @@ def main():
             
 
 
-            plt.plot(degrees, fft_dB, label = '{}'.format(legend[k]))
+            plt.plot(deg, fft_dB, label = '{}'.format(legend[k]))
 
         plt.ylim((-60, 0))
         plt.xlabel('Angle [deg]', fontsize = 14)
@@ -387,7 +435,7 @@ def main():
         plt.xticks(fontsize = 12)
         plt.yticks(fontsize = 12)
 
-        plt.xlim((0,5))
+        plt.xlim((0,20))
 
         if len(fft)>1 :
             plt.legend(loc = 'upper right', fontsize = 12)
@@ -416,6 +464,7 @@ def main():
         plt.savefig('plots/{}.png'.format(args.file_name))
         plt.close()
 
+        """
         color = ['blue', 'red', 'black']
         plt.figure()
         for k in range(len(fft)):
@@ -428,7 +477,7 @@ def main():
             plt.xlim((-2,2))
         plt.savefig('pouetpouet')
         plt.close()
-
+        """
 
 if __name__ == '__main__':
     main()
