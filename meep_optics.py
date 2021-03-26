@@ -136,11 +136,11 @@ class OpticalSystem(object):
             err_right_pos = int(err_left[int(np.around(y_res/resolution/surf_err_width))]) 
             err_right_neg = int(err_left[- int(np.around(y_res/resolution/surf_err_width))])
 
-            x_left_neg = x_left + err_left_neg
-            x_left_pos = x_left + err_left_pos
+            x_left_neg = x_left #+ err_left_neg
+            x_left_pos = x_left #+ err_left_pos
 
-            x_right_neg = x_right + err_right_neg
-            x_right_pos = x_right + err_right_pos
+            x_right_neg = x_right #+ err_right_neg
+            x_right_pos = x_right #+ err_right_pos
 
 
             #Write lens between left and right surface below optical axis
@@ -271,7 +271,7 @@ class OpticalSystem(object):
                       material = mp.metal)
                 
                 if self.geometry is not None :
-                    #If there are already objects in geometry, adds the aperture
+                    #If there are already objects in geometry, adds the tube
                     #instead of replacing what was there
                     
                     self.geometry.append(c1)
@@ -294,7 +294,7 @@ class OpticalSystem(object):
 
                 
                 if self.geometry is not None :
-                    #If there are already objects in geometry, adds the aperture
+                    #If there are already objects in geometry, adds the absorber
                     #instead of replacing what was there
                     
                     self.geometry.append(c2)
@@ -302,6 +302,21 @@ class OpticalSystem(object):
                     
                 else :
                     self.geometry = [c2, c4]
+
+            elif component.object_type == 'HWP':
+                HWP = mp.Block(center = mp.Vector3(component.x_pos - self.size_x/2, 0, 0),
+                                size = mp.Vector3(component.thick, component.size_y, 0),
+                                material = mp.Medium(epsilon_diag = component.diag, 
+                                    epsilon_offdiag = component.offdiag))
+
+                if self.geometry is not None :
+                    #If there are already objects in geometry, adds the HWP
+                    #instead of replacing what was there
+                    
+                    self.geometry.append(HWP)
+                    
+                else :
+                    self.geometry = [HWP]
 
             elif component.object_type == 'PrismsTube':
 
@@ -463,24 +478,29 @@ class OpticalSystem(object):
         plt.savefig('lenses')
         plt.close()
         
-    def write_h5file(self):
+    def write_h5file(self, parallel = False):
         #Writes the file that will then be read within the sim function
         
-        #rank = MPI.COMM_WORLD.rank
+        if parallel : 
+            comm = MPI.COMM_WORLD
+            rank = comm.rank
 
-        comm = MPI.COMM_WORLD
-        rank = comm.rank
-
-        h = h5py.File('epsilon_map.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
-        #h = h5py.File('epsilon_map3D.h5', 'w')
-        size_x = len(self.permittivity_map[:,0])
-        size_y = len(self.permittivity_map[0,:])
-        dset = h.create_dataset('eps', (size_x, size_y), dtype = 'float32', compression = "gzip")
-        with dset.collective :
-            dset[:,:] = self.permittivity_map
+            h = h5py.File('epsilon_map.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
         
-        h.close()
-        self.permittivity_map = 0
+            size_x = len(self.permittivity_map[:,0])
+            size_y = len(self.permittivity_map[0,:])
+            dset = h.create_dataset('eps', (size_x, size_y), dtype = 'float32', compression = "gzip")
+            with dset.collective :
+                dset[:,:] = self.permittivity_map
+        
+            h.close()
+
+        elif not parallel :
+            h = h5py.File('epsilon_map.h5', 'w')
+            dset = h.create_dataset('eps', data = self.permittivity_map)
+            h.close()
+
+        #self.permittivity_map = 0
         
     def delete_h5file(self):
         #Deletes the h5 file, can be useful when the file is heavy and not to 
@@ -519,13 +539,28 @@ class Absorber(object):
         self.object_type = 'Absorber'           #OBJECT TYPE
         self.thick = thick                      #TUBE THICKNESS
         self.center = center                    #DISTANCE OF CENTER FROM OPTICAL AXIS
-        self.epsilon_real = eps_real            #REAL PART OF PERMITTIVITY
-        self.epsilon_imag = eps_imag            #COMPLEX PART OF PERMITTIVITY
+        self.epsilon_real = epsilon_real            #REAL PART OF PERMITTIVITY
+        self.epsilon_imag = epsilon_imag            #COMPLEX PART OF PERMITTIVITY
         self.freq = freq                        #OPERATING FREQUENCY
-        self.conductivity = eps_imag*2*np.pi*freq/eps_real #CONDUCTIVITY FOR MEEP
+        self.conductivity = epsilon_imag*2*np.pi*freq/epsilon_real #CONDUCTIVITY FOR MEEP
 
 
         #ECCOSORB CR110 @ 100 GHz : eps_real = 3.5, eps_imag = 0.11025, freq = 1/3
+
+class HalfWavePlate(object):
+    def __init__(self, name = '', fast_ax_index = 3.019, slow_ax_index = 3.336, thick = 5, x_pos = 0, size_y = 300, theta = np.pi/4):
+        eps_0 = fast_ax_index**2
+        eps_e = slow_ax_index**2
+
+        self.object_type = 'HWP'
+        self.diag = mp.Vector3(eps_0, 
+                        eps_0*(np.cos(theta)**2) + eps_e*(np.sin(theta)**2), 
+                        eps_0*(np.sin(theta)**2) + eps_e*(np.cos(theta)**2))
+        self.offdiag = mp.Vector3(0,0, (eps_e-eps_0)*np.cos(theta)*np.sin(theta))
+        self.thick = thick
+        self.x_pos = x_pos
+        self.size_y = size_y
+        
 
 class AsphericLens(object):
     """
@@ -558,7 +593,7 @@ class AsphericLens(object):
         self.x = x                      #X POSITION OF LEFT SURFACE CENTER
         self.y = y                      #Y POSITION OF LEFT SURFACE CENTER
         self.material = n_refr**2       #DIELECTRIC PERMITTIVITY
-        self.object_type = 'Lens'
+        self.object_type = 'Lens'       #OBJECT TYPE
 
         self.AR_left = AR_left          #LEFT AR COATING THICKNESS
         self.AR_right = AR_right        #RIGHT AR COATING THICKNESS
@@ -711,6 +746,8 @@ class Sim(object):
         ### computational cell so that the PML doesn't overlap on the materials.
         
         self.pml_layers = [mp.PML(thickness = dpml)]
+        self.cell_size_x = self.opt_sys.size_x+2*dpml
+        self.cell_size_y = self.opt_sys.size_y+2*dpml
         self.cell = mp.Vector3(self.opt_sys.size_x+2*dpml, self.opt_sys.size_y+2*dpml)
         
     def define_source(self, frequency = None,
@@ -887,6 +924,7 @@ class Sim(object):
         plt.xlabel('x times resolution')
         plt.ylabel('y times resolution')
         plt.savefig('2Dsystem')
+        plt.show()
         plt.close()
     
     def plot_efield(self, path = '.', comp = 'Ez') :
@@ -898,14 +936,17 @@ class Sim(object):
             e_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Ez)
         elif comp == 'Ey':
             e_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Ey)
+
+        extent = [0, self.cell_size_x, 0, self.cell_size_y]
         plt.figure(figsize = (20,20))
-        plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary')
-        plt.imshow(e_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9)
-        plt.xlabel('x times resolution')
-        plt.ylabel('y times resolution')
+        plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', extent = extent)
+        plt.imshow(e_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9, extent = extent)
+        plt.xlabel('x')
+        plt.ylabel('y')
         plt.savefig('{}/efield'.format(path))
         plt.show()
-        
+        plt.close()
+
     def plot_airy_spot(self):
 
         #Makes a plot of the evolution of the instantaneous Ez squared over the 
@@ -924,7 +965,7 @@ class Sim(object):
         plt.ylabel('$E^2$')
         plt.show()
     
-    def plot_beam(self, single_plot = True, colors = ['r'], plot_n = 0, linestyle = '-',
+    def plot_beam(self, single_plot = False, colors = ['r'], plot_n = 0, linestyle = '-',
                   aper_pos_x = 10, aperture_size = 200):
         """
         Plots the Ez component of the electric field at the aperture. Is used when
@@ -1003,17 +1044,18 @@ class Sim(object):
             phase[k] = popt[1]
 
         ### Plot
-        plt.plot(np.arange(len(amplitude))/self.sim_resolution, 
+        
+    
+        if single_plot :
+            #Displays the plot if single_plot is True
+            plt.plot(np.arange(len(amplitude))/self.sim_resolution, 
                     amplitude, 
                     color = colors[plot_n],
                     alpha = .9,
                     linestyle = linestyle) 
-        plt.title('E field amplitude on aperture, $\lambda = ${:2.1} mm'.format(self.wavelength))
-        plt.xlabel('y (mm)')
-        plt.ylabel('$E^2$')
-    
-        if single_plot :
-            #Displays the plot if single_plot is True
+            plt.title('E field amplitude on aperture, $\lambda = ${:2.1} mm'.format(self.wavelength))
+            plt.xlabel('y (mm)')
+            plt.ylabel('$E^2$')
             plt.show()
         
         return amplitude*np.exp(1j*phase)
@@ -1036,8 +1078,8 @@ class Analysis(object):
     def image_plane_beams(self, frequency = None, wavelength = None, 
                         fwidth = 0,
                         sourcetype = 'Gaussian beam', 
-                        y_max = 0., Nb_sources = 1., sim_resolution = 1,
-                        linestyle = '-', runtime = 800):
+                        y_max = 0., Nb_sources = 1, sim_resolution = 1,
+                        linestyle = '-', runtime = 800, aperture_size = 200):
         """
         Sends gaussian beams (mono or multichromatic) from the image plane and 
         recovers the E-field squared at the aperture. Also plots the electric 
@@ -1088,6 +1130,7 @@ class Analysis(object):
             wavelength = 1/frequency
 
         self.wavelength = wavelength
+        self.aperture_size = aperture_size
 
         #For the plot of the electric fields, the cmap is created for the colors
         #to represent the distance from the optical axis
@@ -1120,7 +1163,11 @@ class Analysis(object):
             self.sim.run_sim(runtime = runtime, sim_resolution = sim_resolution)
 
             #Gets the complex electric field and adds it to the plot
-            E_field = self.sim.plot_beam(single_plot = False, colors= colors, plot_n = k, linestyle = linestyle)
+            E_field = self.sim.plot_beam(single_plot = False, 
+                colors= colors, 
+                plot_n = k, 
+                linestyle = linestyle, 
+                aperture_size = aperture_size)
 
             #Get the FWHM for the field at aperture
             middle_idx = np.int(len(E_field)/2)
@@ -1144,15 +1191,12 @@ class Analysis(object):
             self.list_efields[k] = E_field
         
     
-    def beam_FT(self, aperture_size = 200, precision_factor = 5):
+    def beam_FT(self, precision_factor = 15):
 
         """
         Gets the Fourier Transforms of the complex electric fields at aperture.
         Parameters
         ----------
-        aperture_size : FLOAT, optional
-            Size of the aperture. Only the relevant part of the electric field is then
-            used for the fourier transform
         precision_factor : FLOAT, optional
             If the gaussian pattern over the aperture is large, the precision_factor
             is used to add zeros to the electric field list so that the final list is
@@ -1200,6 +1244,99 @@ class Analysis(object):
             self.FWHM_fft[k] = freq_interp*2*180/np.pi
         return freq, FFTs
 
+    def plotting(self, freq, FFTs, wavelength,
+                deg_range =20,
+                ylim = -60, 
+                symmetric_beam = True,
+                legend = None,
+                print_solid_angle = False,
+                print_fwhm = False,
+                savefig = False,
+                path_name = 'plots/meep_guide_plot'):
+
+
+        deg = np.arctan(freq*wavelength)*180/np.pi
+        rads = np.array(deg) * np.pi/180
+        rads = np.append(rads, 0)
+
+        plt.figure(figsize = (8,6))
+        
+        def gaussian(x, stddev, mean):
+            return np.exp(-(((x-mean)/4/stddev)**2))
+        
+        for k in range(len(FFTs)):
+
+            fft_k = FFTs[k]
+            fft_dB = 10*np.log10(np.abs(fft_k))
+
+
+            #BEAM SOLID ANGLE CALCULATION
+            if print_solid_angle :
+                
+                middle = int(len(fft_k)/2)
+                integrand = np.append(fft_k, fft_k[0])
+                right_part = np.trapz(integrand[:middle], x = rads[:middle])
+                left_part = np.trapz(integrand[middle:], x = rads[middle:])
+                solid_angle = right_part + left_part
+                print('Beam n.{} solid angle : {:.3e} srads'.format(k, solid_angle*2*np.pi))
+            
+            if legend is not None : 
+                plt.plot(deg, fft_dB, label = '{}'.format(legend[k]))
+
+            if legend is None :
+                plt.plot(deg, fft_dB)
+
+            #BEST FIT GAUSSIAN FWHM
+            if print_fwhm :
+                popt, psig = sc.curve_fit(gaussian, deg, fft_k)
+                fwhm = popt[1] + 4*popt[0]*np.sqrt(np.log(2))
+                fwhm_th = wavelength/self.aperture_size*180/np.pi
+                print('Best fit Gaussian FWHM : {:.2f}deg'.format(2*fwhm))
+                print('Theoretical FWHM : {:.2f}deg'.format(fwhm_th))
+                y = 10*np.log10(gaussian(deg, popt[0], popt[1]))
+                #plt.plot(deg, y, linestyle = '--')
+
+
+        plt.ylim((ylim, 0))
+        plt.xlabel('Angle [deg]', fontsize = 14)
+        plt.ylabel('Power [dB]', fontsize = 14)
+        plt.xticks(fontsize = 12)
+        plt.yticks(fontsize = 12)
+
+        if symmetric_beam :
+            plt.xlim((0,deg_range))
+        if not symmetric_beam : 
+            plt.xlim((-deg_range, deg_range))
+
+        if legend is not None :
+            plt.legend(loc = 'upper right', fontsize = 12)
+
+
+        #elif len(fft) == 1:
+        #    plt.xlim((0,10))
+
+        #plt.legend(('+2 $\%$ change', '0 $\%$ change', '-2 $\%$ change'))
+        #plt.legend(('1mm', '0.5mm', '0.25mm'))
+
+        """
+        fwhm = args.wvl*0.28648
+
+        plt.vlines([-fwhm/2, fwhm/2], -100, 0, color = 'grey', linestyle = 'dashdot')
+        plt.vlines([fwhm_fft[0]/2], -100, 0, color='grey', linestyle = '--', alpha = 0.7)
+        plt.annotate('Expected FWHM : {:.2f}deg'.format(fwhm), 
+            xy = (.25, .9), xycoords='figure fraction', color = 'grey')
+        plt.annotate('Beam FWHM : {:.2f}deg'.format(fwhm_fft[0]), 
+            xy = (.25, .87), xycoords='figure fraction', color = 'grey', alpha = 0.7)
+        """
+
+        #plt.annotate('Field FWHM : {:.2f}mm'.format(fwhm_ap[0]), 
+        #    xy = (.1, .84), xycoords='figure fraction')
+        plt.tight_layout()
+        plt.show()
+        if savefig :
+            plt.savefig('{}.png'.format(path_name))
+        plt.close()
+
 
 if __name__ == '__main__':
     
@@ -1215,7 +1352,7 @@ if __name__ == '__main__':
                          x = 130.+10., 
                          y = 0., 
                          AR_left = 2.5, AR_right = 2.5,
-                         delam_thick = 0,
+                         delam_thick = 5,
                          delam_width = 5,
                          therm_def = True)
     
@@ -1228,7 +1365,7 @@ if __name__ == '__main__':
                          x = 40.+130.+369.408+10., 
                          y = 0.,
                          AR_left = 2.5, AR_right = 2.5,
-                         delam_thick = 0,
+                         delam_thick = 5,
                          delam_width = 5)
     
     aperture_stop = ApertureStop(name = 'Aperture Stop',
@@ -1258,7 +1395,7 @@ if __name__ == '__main__':
     dpml = 5
 
     
-    opt_sys.assemble_system(dpml = dpml, resolution = 20)
+    opt_sys.assemble_system(dpml = dpml, resolution = 2)
     #opt_sys.make_lens_bubbles(1, 5, 15)
     opt_sys.plot_lenses()
     opt_sys.write_h5file()
