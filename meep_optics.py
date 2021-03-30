@@ -85,11 +85,15 @@ class OpticalSystem(object):
 
         radius = np.int(component.diameter*resolution/2)
 
-        surf_err_width = 1
-        surf_err_scale = 0.1  
-        nb_bins = int(component.diameter/surf_err_width)
-        err_left = np.around(np.random.normal(scale = surf_err_scale*resolution, size = nb_bins))
-        err_right = np.around(np.random.normal(scale = surf_err_scale*resolution, size = nb_bins))
+        if component.surf_err_scale!=0 :
+            nb_bins = int(component.diameter/component.surf_err_width)
+            err_left = np.around(np.random.normal(scale = component.surf_err_scale*resolution, size = nb_bins))
+            err_right = np.around(np.random.normal(scale = component.surf_err_scale*resolution, size = nb_bins))
+
+        if component.surf_err_scale == 0:
+            nb_bins = int(component.diameter/component.surf_err_width)
+            err_left = np.zeros(nb_bins)
+            err_right = np.zeros(nb_bins)
         
 
         for y_res in range(radius) :           
@@ -130,17 +134,17 @@ class OpticalSystem(object):
 
 
             #Surface error
-            err_left_pos = int(err_left[int(np.around(y_res/resolution/surf_err_width))])
-            err_left_neg = int(err_left[- int(np.around(y_res/resolution/surf_err_width))])
+            err_left_pos = int(err_left[int(np.around(y_res/resolution/component.surf_err_width))])
+            err_left_neg = int(err_left[- int(np.around(y_res/resolution/component.surf_err_width))])
 
-            err_right_pos = int(err_left[int(np.around(y_res/resolution/surf_err_width))]) 
-            err_right_neg = int(err_left[- int(np.around(y_res/resolution/surf_err_width))])
+            err_right_pos = int(err_left[int(np.around(y_res/resolution/component.surf_err_width))]) 
+            err_right_neg = int(err_left[- int(np.around(y_res/resolution/component.surf_err_width))])
 
-            x_left_neg = x_left #+ err_left_neg
-            x_left_pos = x_left #+ err_left_pos
+            x_left_neg = x_left + err_left_neg
+            x_left_pos = x_left + err_left_pos
 
-            x_right_neg = x_right #+ err_right_neg
-            x_right_pos = x_right #+ err_right_pos
+            x_right_neg = x_right + err_right_neg
+            x_right_pos = x_right + err_right_pos
 
 
             #Write lens between left and right surface below optical axis
@@ -581,6 +585,8 @@ class AsphericLens(object):
                  delam_width = 10,
                  radial_slope = 0,
                  axial_slope = 0,
+                 surf_err_width = 1,
+                 surf_err_scale = 0,
                  therm_def = False):
         
         self.name = name                #NAME OF LENS  
@@ -603,6 +609,9 @@ class AsphericLens(object):
 
         self.radial_slope = radial_slope#RADIAL GRADIENT IN THE INDEX
         self.axial_slope = axial_slope  #AXIAL GRADIENT IN THE INDEX
+
+        self.surf_err_width = surf_err_width    #SURFACE ERROR WIDTH
+        self.surf_err_scale = surf_err_scale    #SURFACE ERROR SCALE
 
         self.therm_def = therm_def      #ENABLES THERMAL DEFORMATION
 
@@ -831,7 +840,7 @@ class Sim(object):
                       center = mp.Vector3(self.opt_sys.image_plane_pos-2, y_meep, 0),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y),
                       beam_kdir = mp.Vector3(-1, 0),
-                      beam_w0 = self.opt_sys.size_y,
+                      beam_w0 = beam_width,
                       beam_E0 = mp.Vector3(0,0,1),
                       size=mp.Vector3(size_x, size_y, 0))]
             
@@ -858,7 +867,7 @@ class Sim(object):
         return self.source
     
     
-    def run_sim(self, runtime = 0., dpml = None, sim_resolution = 1):
+    def run_sim(self, runtime = 0., dpml = None, sim_resolution = 1, get_mp4 = False, Nfps = 24):
         """
         Creates the sim environment as defined by MEEP and then runs it.
         
@@ -895,15 +904,23 @@ class Sim(object):
         #previously
         self.sim = mp.Simulation(cell_size=self.cell,
                     boundary_layers=self.pml_layers,
-                    geometry=self.opt_sys.geometry, 
+                    #geometry=self.opt_sys.geometry, 
                     sources=self.source,
                     resolution=self.sim_resolution,
                     epsilon_input_file = 'epsilon_map.h5:eps')     
-        
+
+
         #n2f_obj = self.sim.add_near2far(self.frequency, 0, 1, mp.Near2FarRegion(center=mp.Vector3(-390), size=mp.Vector3(y=200)))
 
         #Runs the sim
-        self.sim.run(until = runtime)
+        
+
+        if get_mp4 :
+            self.sim.sim.run(mp.at_every(1, animate), until = runtime)
+            animate.to_mp4(Nfps, 'test.mp4')
+
+        if not get_mp4 :
+            self.sim.run(until = runtime)
         
         #self.oui = abs(self.sim.get_farfields(n2f_obj, 10, center=mp.Vector3(-2000), size=mp.Vector3(y=800))['Ez'])**2
         
@@ -1341,7 +1358,7 @@ class Analysis(object):
 if __name__ == '__main__':
     
     opt_sys = OpticalSystem('test')
-    opt_sys.set_size(750,300)
+    opt_sys.set_size(800,300)
     
     lens1 = AsphericLens(name = 'Lens 1', 
                          r1 = 327.365, 
@@ -1350,11 +1367,7 @@ if __name__ == '__main__':
                          c2 = 0, 
                          thick = 40, 
                          x = 130.+10., 
-                         y = 0., 
-                         AR_left = 2.5, AR_right = 2.5,
-                         delam_thick = 5,
-                         delam_width = 5,
-                         therm_def = True)
+                         y = 0.)
     
     lens2 = AsphericLens(name = 'Lens 2', 
                          r1 = 269.190, 
@@ -1363,10 +1376,7 @@ if __name__ == '__main__':
                          c2 = 1770.36, 
                          thick = 40, 
                          x = 40.+130.+369.408+10., 
-                         y = 0.,
-                         AR_left = 2.5, AR_right = 2.5,
-                         delam_thick = 5,
-                         delam_width = 5)
+                         y = 0.)
     
     aperture_stop = ApertureStop(name = 'Aperture Stop',
                                  pos_x = 10,
@@ -1384,29 +1394,42 @@ if __name__ == '__main__':
     
 
 
+    wavelength = 10
+    dpml = 5
+    
+    tube = TelescopeTube('Tube', thick =10, center = 165)
+    absorber = Absorber('Absorber', thick = 10, center = 155, epsilon_real = 3.5, epsilon_imag = 0.05, freq = 1/wavelength)
+
+
     opt_sys.add_component(lens1)
     opt_sys.add_component(lens2)
     opt_sys.add_component(aperture_stop)
     opt_sys.add_component(image_plane)
-    print(opt_sys.list_components())
-    opt_sys.sys_info(frequency = 0.5)
+    #opt_sys.add_component(tube)
+    #opt_sys.add_component(absorber)    
     
-    wavelength = 10
-    dpml = 5
 
     
-    opt_sys.assemble_system(dpml = dpml, resolution = 2)
-    #opt_sys.make_lens_bubbles(1, 5, 15)
+    opt_sys.assemble_system(dpml = dpml, resolution = 1)
     opt_sys.plot_lenses()
     opt_sys.write_h5file()
 
-    """
+    
     sim = Sim(opt_sys)
-    sim.define_source(wavelength = 10, sourcetype = 'Gaussian beam', 
-                      x=710, y= 0, beam_width = 10, 
+    """
+    sim.define_source(wavelength = wavelength, sourcetype = 'Gaussian beam', 
+                      x=0, y=0, beam_width = 10, 
                       focus_pt_x= 0, focus_pt_y=0, size_x = 0, size_y=10)
-    sim.run_sim(runtime = 1, sim_resolution = 2)
+    sim.run_sim(runtime = 800, sim_resolution = 1)
+    sim.plot_efield()
+    """
 
+    analyse = Analysis(sim)
+    analyse.image_plane_beams(wavelength = wavelength, sim_resolution = 1)
+    freq, ft = analyse.beam_FT()
+    analyse.plotting(freq, ft, wavelength, path_name = 'pouet', savefig = True)
+
+    """
     animate = mp.Animate2D(sim.sim,
                        fields=mp.Ez,
                        realtime=True,
@@ -1414,7 +1437,10 @@ if __name__ == '__main__':
                        boundary_parameters={'hatch':'o', 'linewidth':1.5, 'facecolor':'y', 'edgecolor':'b', 'alpha':0.3})
 
     sim.sim.run(mp.at_every(5,animate), until = 800)
-    N_fps = 10 #sets the number of frames per second for the movie. Here it has 40 frames, so let's just run at 5fps.
-    animate.to_mp4(N_fps, 'delam_1side.mp4')
+    N_fps = 7 #sets the number of frames per second for the movie. Here it has 40 frames, so let's just run at 5fps.
+    animate.to_mp4(N_fps, 'surf_err.mp4')
     #sim.plot_efield()
     """
+
+    
+
