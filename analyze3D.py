@@ -16,7 +16,7 @@ lens1 = AsphericLens(name = 'Lens 1',
                     diameter = 300,
                     AR_left = 0, AR_right = 0,
                     delam_thick = 0,
-                    delam_width = 10,
+                    delam_width = 00,
                     axial_slope = 0,
                     radial_slope = 0)
     
@@ -30,7 +30,7 @@ lens2 = AsphericLens(name = 'Lens 2',
                     diameter = 300,
                     AR_left = 0, AR_right = 0,
                     delam_thick = 0,
-                    delam_width = 10,
+                    delam_width = 00,
                     axial_slope = 0, 
                     radial_slope = 0)
 
@@ -47,7 +47,7 @@ image_plane = ImagePlane(name = 'Image Plane',
                         pos_x = 10+714.704,
                         side_size = 300,
                         thickness = 2,
-                        n_refr = 1.2, 
+                        n_refr = 1., 
                         conductivity = 0)
 
 tube = TelescopeTube(name = 'Tube', 
@@ -258,9 +258,21 @@ def main():
         degrees = data['degrees']
 
         deg = np.array(degrees)
-        deg = np.append(deg, 0)
-        X = [deg for k in range(len(deg))]
-        Y = [np.ones(len(deg))*deg[k] for k in range(len(deg))]
+        #deg = np.append(deg, 0)
+        #X = [deg for k in range(len(deg))]
+        #Y = [np.ones(len(deg))*deg[k] for k in range(len(deg))]
+
+        azimuth_rad = deg*np.pi/180
+        azimuth_deg = deg
+
+        theta_rad = deg*np.pi/180
+
+        elevation_rad = np.arctan(np.tan(theta_rad)/np.sqrt(1+(np.tan(azimuth_rad)**2)))
+
+
+        AZ_mat = np.array([azimuth_deg for k in range(len(azimuth_deg))])
+        EL_mat = np.array([[np.arctan(np.tan(theta_rad[k])/np.sqrt(1+(np.tan(azimuth_rad[i])**2)))*180/np.pi for i in range(len(deg))] for k in range(len(deg))])
+        #EL_mat = np.array([np.ones(len(azimuth_deg))*azimuth_deg[k] for k in range(len(azimuth_deg))])
 
         for k in range(len(fft)):
 
@@ -281,23 +293,26 @@ def main():
             plt.close()
             """
 
+
+            fft_dB = 10*np.log10(np.abs(fft[0]))
+
             fft_dB2 = np.concatenate((fft_dB[middle_idx:,:], fft_dB[:middle_idx,:]), axis = 0)
             fft_reshaped = np.concatenate((fft_dB2[:, middle_idx:], fft_dB2[:, :middle_idx]), axis = 1)
 
             plt.figure(figsize=(10,10))
             ax = plt.subplot(111)
-            #im = ax.imshow(fft_reshaped, origin = 'lower', extent = (-90,90,-90,90), vmin = -40, vmax = 0)
+            im = ax.imshow(fft_reshaped, origin = 'lower', extent = (-90,90,-90,90), vmin = -40, vmax = 0)
             ax.set_xlabel('Angle [deg]')
             ax.set_ylabel('Angle [deg]')
             ax.set_aspect('equal')
             plt.annotate('solid Angle : {:.4e}srad'.format(solid_angle), xy = (.25, .9), xycoords='figure fraction')
 
-            pouet = np.hstack((fft_dB, np.transpose([fft_dB[:,0]])))
-            fft_test = np.vstack((pouet, [pouet[0,:]]))
+            #pouet = np.hstack((fft_dB, np.transpose([fft_dB[:,0]])))
+            #fft_test = np.vstack((pouet, [pouet[0,:]]))
 
-            c = ax.contourf(X,Y,fft_test, cmap=plt.get_cmap('viridis'),levels=np.arange(-30,1)*2, vmin = -60, vmax = 0)
+            #c = ax.contourf(AZ_mat,EL_mat,fft_reshaped, cmap=plt.get_cmap('viridis'),levels=np.arange(-30,1)*2, vmin = -60, vmax = 0)
 
-            cbar = plt.colorbar(c,fraction=0.046, pad=0.04)
+            cbar = plt.colorbar(im,fraction=0.046, pad=0.04)
             cbar.ax.set_xlabel('Power [dB]')
             ax.set_xlim((-20,20))
             ax.set_ylim((-20,20))

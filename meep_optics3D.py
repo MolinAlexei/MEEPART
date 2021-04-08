@@ -246,6 +246,7 @@ class OpticalSystem(object):
             ### LENSES
             if component.object_type == 'Lens':
                 
+                #print('baguette')
                 self.write_lens(component, epsilon_map, resolution)
 
             elif component.object_type == 'Tube':
@@ -932,9 +933,9 @@ class Sim(object):
                     resolution=self.sim_resolution,
                     #subpixel_tol = 0.1,
                     #subpixel_maxeval = 10,
-                    eps_averaging = False,
-                    material_function = matfunc)
-                    #epsilon_input_file = 'epsilon_map3D.h5:eps')     
+                    #eps_averaging = False,
+                    #material_function = matfunc)
+                    epsilon_input_file = 'epsilon_map3D.h5:eps')     
         #Runs the sim
         self.sim.run(until = runtime)
 
@@ -1034,7 +1035,7 @@ class Sim(object):
         timestep = .3
 
         #50 steps Is roughly enough to give a few periods for wavelengths from 1 to 10
-        n_iter = 50
+        n_iter = 40
         
         #Get the real field at aperture
         efield = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0, 0), 
@@ -1192,7 +1193,7 @@ class Analysis(object):
             #Defines the source at the appropriate height on the image plane
             self.sim.define_source(frequency, 
                                    sourcetype = sourcetype,
-                                   x=self.sim.opt_sys.image_plane_pos-3, y = height, z= 0, 
+                                   x=self.sim.opt_sys.image_plane_pos, y = height, z= 0, 
                                    size_x = 0, size_y = 10, size_z = 10, 
                                    beam_width = 10)
             
