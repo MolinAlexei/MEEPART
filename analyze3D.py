@@ -13,12 +13,7 @@ lens1 = AsphericLens(name = 'Lens 1',
                     c2 = 0, 
                     thick = 40, 
                     x = 10.+130.,
-                    diameter = 300,
-                    AR_left = 0, AR_right = 0,
-                    delam_thick = 0,
-                    delam_width = 00,
-                    axial_slope = 0,
-                    radial_slope = 0)
+                    diameter = 300)
     
 lens2 = AsphericLens(name = 'Lens 2', 
                     r1 = 269.190, 
@@ -27,12 +22,7 @@ lens2 = AsphericLens(name = 'Lens 2',
                     c2 = 1770.36, 
                     thick = 40., 
                     x = 40.+130.+369.408+10.,
-                    diameter = 300,
-                    AR_left = 0, AR_right = 0,
-                    delam_thick = 0,
-                    delam_width = 00,
-                    axial_slope = 0, 
-                    radial_slope = 0)
+                    diameter = 300)
 
 aperture_stop = ApertureStop(name = 'Aperture Stop',
                             pos_x = 10,

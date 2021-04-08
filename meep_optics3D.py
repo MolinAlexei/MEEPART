@@ -849,7 +849,7 @@ class Sim(object):
         elif sourcetype == 'Gaussian beam':
             self.source = [mp.GaussianBeamSource(mp.ContinuousSource(frequency),
                       component = mp.Ez,
-                      center = mp.Vector3(self.opt_sys.image_plane_pos-2, y, z),
+                      center = mp.Vector3(self.opt_sys.image_plane_pos, y, z),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y, focus_pt_z),
                       beam_kdir = mp.Vector3(-1, 0, 0),
                       beam_w0 = beam_width,
@@ -1035,7 +1035,7 @@ class Sim(object):
         timestep = .3
 
         #50 steps Is roughly enough to give a few periods for wavelengths from 1 to 10
-        n_iter = 40
+        n_iter = 120
         
         #Get the real field at aperture
         efield = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0, 0), 
@@ -1194,7 +1194,7 @@ class Analysis(object):
             self.sim.define_source(frequency, 
                                    sourcetype = sourcetype,
                                    x=self.sim.opt_sys.image_plane_pos, y = height, z= 0, 
-                                   size_x = 0, size_y = 10, size_z = 10, 
+                                   size_x = 0, size_y = 300, size_z = 300, 
                                    beam_width = 10)
             
             #Runs the sim
