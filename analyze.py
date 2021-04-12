@@ -30,15 +30,15 @@ aperture_stop = ApertureStop(name = 'Aperture Stop',
                              pos_x = 10,
                              diameter = 200,
                              thickness = 5,
-                             n_refr = 1.1, 
+                             n_refr = 1, 
                              conductivity = 1e7)
     
 image_plane = ImagePlane(name = 'Image Plane',
                          pos_x = 10+714.704,
                          diameter = 300,
                          thickness = 2,
-                         n_refr = 1.1, 
-                         conductivity = 0.01)
+                         n_refr = 1, 
+                         conductivity = 0)
 
 tube = TelescopeTube('Tube')
 absorber = Absorber('Absorber')
@@ -50,7 +50,7 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml,
                     telescope_tube = False,
                     absorb = False):
     opt_sys = OpticalSystem('test')
-    opt_sys.set_size(800,340)
+    opt_sys.set_size(750,300)
     opt_sys.add_component(lens1)
     opt_sys.add_component(lens2)
     opt_sys.add_component(aperture_stop)
@@ -115,16 +115,16 @@ def main():
         analysis.image_plane_beams(wavelength = args.wvl, fwidth = 0, sourcetype='Gaussian beam',
                                     y_max = 100, Nb_sources = args.beam_nb, sim_resolution = args.resolution) 
 
-        analysis.sim.plot_system()
+        analysis.sim.plot_efield()
 
-        freq, fft = analysis.beam_FT(aperture_size = 200, precision_factor = 15)
+        freq, fft = analysis.beam_FT(precision_factor = 15)
         degrees = np.arctan(freq*args.wvl)*180/np.pi
         fwhm_fft = analysis.FWHM_fft[0]
         fwhm_ap = analysis.FWHM_ap[0]
 
         name = 'FFT_data/' + args.file_name + '.h5'
 
-        h = h5py.File(name, 'w', driver ='mpio', comm=MPI.COMM_WORLD)
+        h = h5py.File(name, 'w')#, driver ='mpio', comm=MPI.COMM_WORLD)
         h.create_dataset('degrees', data=degrees)
         h.create_dataset('ffts', data=fft)
         h.create_dataset('fwhm_fft', data=[fwhm_fft])
@@ -150,7 +150,7 @@ def main():
             analysis.image_plane_beams(wavelength = args.wvl, fwidth = 0, sourcetype='Gaussian beam',
                                     y_max = 100, Nb_sources = args.beam_nb, sim_resolution = args.resolution) 
 
-            freq, fft_k = analysis.beam_FT(aperture_size = 200, precision_factor = 15)
+            freq, fft_k = analysis.beam_FT(precision_factor = 15)
             fft.append(fft_k[1].real)
 
             analysis.sim.plot_efield()
@@ -435,7 +435,7 @@ def main():
         plt.xticks(fontsize = 12)
         plt.yticks(fontsize = 12)
 
-        plt.xlim((0,20))
+        plt.xlim((0,45))
 
         if len(fft)>1 :
             plt.legend(loc = 'upper right', fontsize = 12)
@@ -447,16 +447,17 @@ def main():
         #plt.legend(('+2 $\%$ change', '0 $\%$ change', '-2 $\%$ change'))
         #plt.legend(('1mm', '0.5mm', '0.25mm'))
 
-        """
+        
         fwhm = args.wvl*0.28648
 
+        plt.hlines(-3,0,90)
         plt.vlines([-fwhm/2, fwhm/2], -100, 0, color = 'grey', linestyle = 'dashdot')
-        plt.vlines([fwhm_fft[0]/2], -100, 0, color='grey', linestyle = '--', alpha = 0.7)
-        plt.annotate('Expected FWHM : {:.2f}deg'.format(fwhm), 
-            xy = (.25, .9), xycoords='figure fraction', color = 'grey')
-        plt.annotate('Beam FWHM : {:.2f}deg'.format(fwhm_fft[0]), 
-            xy = (.25, .87), xycoords='figure fraction', color = 'grey', alpha = 0.7)
-        """
+        #plt.vlines([fwhm_fft[0]/2], -100, 0, color='grey', linestyle = '--', alpha = 0.7)
+        #plt.annotate('Expected FWHM : {:.2f}deg'.format(fwhm), 
+        #    xy = (.25, .9), xycoords='figure fraction', color = 'grey')
+        #plt.annotate('Beam FWHM : {:.2f}deg'.format(fwhm_fft[0]), 
+        #    xy = (.25, .87), xycoords='figure fraction', color = 'grey', alpha = 0.7)
+        
 
         #plt.annotate('Field FWHM : {:.2f}mm'.format(fwhm_ap[0]), 
         #    xy = (.1, .84), xycoords='figure fraction')

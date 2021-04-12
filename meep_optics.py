@@ -1096,7 +1096,8 @@ class Analysis(object):
                         fwidth = 0,
                         sourcetype = 'Gaussian beam', 
                         y_max = 0., Nb_sources = 1, sim_resolution = 1,
-                        linestyle = '-', runtime = 800, aperture_size = 200):
+                        linestyle = '-', runtime = 800, aperture_size = 200,
+                        beam_w0 = 10):
         """
         Sends gaussian beams (mono or multichromatic) from the image plane and 
         recovers the E-field squared at the aperture. Also plots the electric 
@@ -1171,8 +1172,8 @@ class Analysis(object):
             self.sim.define_source(frequency, 
                                    sourcetype = sourcetype,
                                    x=self.sim.opt_sys.image_plane_pos-3, y = height, 
-                                   size_x = 0, size_y = 10, 
-                                   beam_width = 10, 
+                                   size_x = 0, size_y = 300, 
+                                   beam_width = beam_w0, 
                                    focus_pt_x = 0, focus_pt_y = 0,
                                    fwidth = fwidth)
             
