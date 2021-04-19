@@ -769,7 +769,7 @@ class Sim(object):
                       fwidth = 0):
         """
         Defines the source to be used by the simulation. Only does one source
-        at a time.
+        at a time
 
         Parameters
         ----------
@@ -837,12 +837,14 @@ class Sim(object):
         elif sourcetype == 'Gaussian beam':
             self.source = [mp.GaussianBeamSource(mp.ContinuousSource(frequency),
                       component = mp.Ez,
-                      center = mp.Vector3(self.opt_sys.image_plane_pos-2, y_meep, 0),
+                      center = mp.Vector3(self.opt_sys.image_plane_pos, y_meep, 0),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y),
                       beam_kdir = mp.Vector3(-1, 0),
                       beam_w0 = beam_width,
                       beam_E0 = mp.Vector3(0,0,1),
                       size=mp.Vector3(size_x, size_y, 0))]
+
+            self.beam_waist = beam_width
             
         elif sourcetype == 'Gaussian beam multichromatic':
             #The multichromatic object is later used so that the averaging time
@@ -904,7 +906,7 @@ class Sim(object):
         #previously
         self.sim = mp.Simulation(cell_size=self.cell,
                     boundary_layers=self.pml_layers,
-                    #geometry=self.opt_sys.geometry, 
+                    geometry=self.opt_sys.geometry, 
                     sources=self.source,
                     resolution=self.sim_resolution,
                     epsilon_input_file = 'epsilon_map.h5:eps')     
@@ -958,6 +960,9 @@ class Sim(object):
         plt.figure(figsize = (20,20))
         plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', extent = extent)
         plt.imshow(e_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9, extent = extent)
+        x = np.ones(20)*self.opt_sys.image_plane_pos + self.cell_size_x/2
+        y = np.linspace(-self.beam_waist, self.beam_waist, 20) + self.cell_size_y/2
+        plt.plot(x, y, c = 'green', linewidth = 3)
         plt.xlabel('x')
         plt.ylabel('y')
         plt.savefig('{}/efield'.format(path))
@@ -982,7 +987,7 @@ class Sim(object):
         plt.ylabel('$E^2$')
         plt.show()
     
-    def plot_beam(self, single_plot = False, colors = ['r'], plot_n = 0, linestyle = '-',
+    def plot_beam(self, plot_amp = False, filename = 'test',
                   aper_pos_x = 10, aperture_size = 200):
         """
         Plots the Ez component of the electric field at the aperture. Is used when
@@ -1010,21 +1015,16 @@ class Sim(object):
         amplitude*phase : complex ARRAY
             Complex electric field at the aperture
 
-        """
-
-        if single_plot :
-            #Displays the plot if single_plot is True
-            plt.figure()
-        
+        """       
         #Setting the timestep to a very low value, so that MEEP uses its lowest timestep
         timestep = .3
 
         #50 steps Is roughly enough to give a few periods for wavelengths from 1 to 10
-        n_iter = 50
+        n_iter = 150
         
         #Get the real field at aperture
         efield = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0), 
-                                         size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)
+                                         size=mp.Vector3(0, aperture_size), component=mp.Ez)
 
         res = self.sim_resolution
 
@@ -1041,7 +1041,7 @@ class Sim(object):
             self.sim.run(until = timestep)
             time[k] = self.sim.meep_time()
             e_field_evol[k] = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0), 
-                                         size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)
+                                         size=mp.Vector3(0, aperture_size), component=mp.Ez)
         
         #Each point on the aperture is fit for a cosine with amplitude and phase
         def f(x, amp, phase):
@@ -1050,9 +1050,10 @@ class Sim(object):
         #Initialize the lists of amplitude and phase over the aperture
         amplitude = np.zeros(aperture_size*res)
         phase = np.zeros(aperture_size*res)
+        #err = np.zeros(aperture_size*res)
 
         #The field is only taken on the opening of the aperture
-        idx = np.int((self.opt_sys.size_y - aperture_size)/2)
+        idx = 0 #np.int((self.opt_sys.size_y - aperture_size)/2)
 
         #Fits amplitude and phase for each point
         for k in range(aperture_size*res):
@@ -1060,20 +1061,31 @@ class Sim(object):
             amplitude[k] = popt[0]
             phase[k] = popt[1]
 
+            #err[k] = np.mean((e_field_evol[:, k] - f(time, popt[0], popt[1]))/e_field_evol[:, k])
+
         ### Plot
         
     
-        if single_plot :
+        if plot_amp :
             #Displays the plot if single_plot is True
-            plt.plot(np.arange(len(amplitude))/self.sim_resolution, 
-                    amplitude, 
-                    color = colors[plot_n],
-                    alpha = .9,
-                    linestyle = linestyle) 
-            plt.title('E field amplitude on aperture, $\lambda = ${:2.1} mm'.format(self.wavelength))
+            norm = np.max(np.abs(amplitude**2))
+            amp = 10*np.log10(np.abs(amplitude**2)/norm)
+            y = np.linspace(-aperture_size/2,aperture_size/2,len(amplitude))
+            plt.figure()
+            plt.plot(y, amp) 
+            plt.ylim((-60,0))
+            plt.xlim((0, aperture_size/2))
+            plt.title('E field amplitude on aperture')
             plt.xlabel('y (mm)')
-            plt.ylabel('$E^2$')
-            plt.show()
+            plt.ylabel('$Amplitude [dB]$')
+            plt.savefig(filename + '.png')
+            plt.close()
+
+            h = h5py.File(filename + '.h5', 'w')
+            h.create_dataset('y', data=y)
+            h.create_dataset('amplitude', data=amplitude, dtype = 'float64')
+            h.create_dataset('phase', data=phase, dtype = 'float64')
+            h.close()
         
         return amplitude*np.exp(1j*phase)
     
@@ -1097,7 +1109,7 @@ class Analysis(object):
                         sourcetype = 'Gaussian beam', 
                         y_max = 0., Nb_sources = 1, sim_resolution = 1,
                         linestyle = '-', runtime = 800, aperture_size = 200,
-                        beam_w0 = 10):
+                        beam_w0 = 10, plot_amp = False, plotname = 'test.png'):
         """
         Sends gaussian beams (mono or multichromatic) from the image plane and 
         recovers the E-field squared at the aperture. Also plots the electric 
@@ -1171,20 +1183,16 @@ class Analysis(object):
             #Defines the source at the appropriate height on the image plane
             self.sim.define_source(frequency, 
                                    sourcetype = sourcetype,
-                                   x=self.sim.opt_sys.image_plane_pos-3, y = height, 
+                                   x=self.sim.opt_sys.image_plane_pos, y = height, 
                                    size_x = 0, size_y = 300, 
-                                   beam_width = beam_w0, 
-                                   focus_pt_x = 0, focus_pt_y = 0,
-                                   fwidth = fwidth)
+                                   beam_width = beam_w0)
             
             #Runs the sim
             self.sim.run_sim(runtime = runtime, sim_resolution = sim_resolution)
 
             #Gets the complex electric field and adds it to the plot
-            E_field = self.sim.plot_beam(single_plot = False, 
-                colors= colors, 
-                plot_n = k, 
-                linestyle = linestyle, 
+            E_field = self.sim.plot_beam(plot_amp = plot_amp,
+                filename = plotname,
                 aperture_size = aperture_size)
 
             #Get the FWHM for the field at aperture
@@ -1207,8 +1215,7 @@ class Analysis(object):
 
             #Updates the list of fields
             self.list_efields[k] = E_field
-        
-    
+
     def beam_FT(self, precision_factor = 15):
 
         """
@@ -1245,10 +1252,10 @@ class Analysis(object):
             fft = np.fft.fft(self.list_efields[k], n = precision_factor*len(self.list_efields[k]))
 
             #Corrective factor for distance to the aperture
-            beam = fft*np.conj(fft)*(1+(freq*self.wavelength)**2)
+            beam = fft*(1+(freq*self.wavelength)**2)
 
             #FFT is normalized by its max
-            FFTs[k] = beam.real
+            FFTs[k] = np.abs(beam) #beam.real
             FFTs[k] = FFTs[k]/np.max(FFTs[k])
 
             #Get the FWHM for the field at aperture, with a linear interpolation
