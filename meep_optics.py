@@ -10,7 +10,7 @@ import os
 import glob
 import csv
 
-mp.verbosity(0)
+mp.verbosity(1)
 
 class OpticalSystem(object):
     """
@@ -870,7 +870,8 @@ class Sim(object):
         return self.source
     
     
-    def run_sim(self, runtime = 0., dpml = None, sim_resolution = 1, get_mp4 = False, Nfps = 24):
+    def run_sim(self, runtime = 0., dpml = None, sim_resolution = 1, 
+            get_mp4 = False, Nfps = 24, movie_name = 'test.mp4', image_every = 5):
         """
         Creates the sim environment as defined by MEEP and then runs it.
         
@@ -916,11 +917,15 @@ class Sim(object):
         #n2f_obj = self.sim.add_near2far(self.frequency, 0, 1, mp.Near2FarRegion(center=mp.Vector3(-390), size=mp.Vector3(y=200)))
 
         #Runs the sim
-        
+        animate = mp.Animate2D(self.sim,
+                       fields=mp.Ez,
+                       realtime=True,
+                       field_parameters={'alpha':0.8, 'cmap':'RdBu', 'interpolation':'none'},
+                       boundary_parameters={'hatch':'o', 'linewidth':1.5, 'facecolor':'y', 'edgecolor':'b', 'alpha':0.3})
 
         if get_mp4 :
-            self.sim.sim.run(mp.at_every(1, animate), until = runtime)
-            animate.to_mp4(Nfps, 'test.mp4')
+            self.sim.run(mp.at_every(image_every, animate), until = runtime)
+            animate.to_mp4(Nfps, movie_name)
 
         if not get_mp4 :
             self.sim.run(until = runtime)
