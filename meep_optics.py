@@ -767,7 +767,8 @@ class Sim(object):
                       size_x = 0, size_y = 300, 
                       beam_width = 0, 
                       focus_pt_x = 0, focus_pt_y = 0,
-                      fwidth = 0):
+                      fwidth = 0,
+                      rot_angle = 0):
         """
         Defines the source to be used by the simulation. Only does one source
         at a time
@@ -827,13 +828,21 @@ class Sim(object):
         
         #Sim is monochromatic by default
         self.multichromatic = False 
+
+        rot_angle *= np.pi/180
+        def amp_func(P):
+            k = mp.Vector3(2*np.pi*np.cos(rot_angle)/self.wavelength,2*np.pi*np.sin(rot_angle)/self.wavelength,0)
+            #k.rotate(axis = mp.Vector(0,0,1), theta = rot_angle)
+            return np.exp(1j* k.dot(P))
+
         
         #Different action for different source types
         if sourcetype == 'Plane wave':
             self.source = [mp.Source(mp.ContinuousSource(frequency, is_integrated=True),
                            component=mp.Ez,
                            center=mp.Vector3(x_meep, y_meep, 0),
-                           size=mp.Vector3(size_x, size_y, 0))]
+                           size=mp.Vector3(size_x, size_y, 0),
+                           amp_func = amp_func)]
         
         elif sourcetype == 'Gaussian beam':
             self.source = [mp.GaussianBeamSource(mp.ContinuousSource(frequency),
