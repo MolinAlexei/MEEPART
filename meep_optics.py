@@ -235,6 +235,7 @@ class OpticalSystem(object):
                                            D_conductivity = component.conductivity))
         
                 
+                self.aper_pos_x = component.x
                 if self.geometry is not None :
                     #If there are already objects in geometry, adds the aperture
                     #instead of replacing what was there
@@ -842,7 +843,7 @@ class Sim(object):
                       beam_kdir = mp.Vector3(-1, 0),
                       beam_w0 = beam_width,
                       beam_E0 = mp.Vector3(0,0,1),
-                      size=mp.Vector3(size_x, size_y, 0))]
+                      size=mp.Vector3(size_x, self.opt_sys.size_y, 0))]
 
             self.beam_waist = beam_width
             
@@ -1081,7 +1082,7 @@ class Sim(object):
             plt.savefig(filename + '.png')
             plt.close()
 
-            h = h5py.File(filename + '.h5', 'w')
+            h = h5py.File(filename + '.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
             h.create_dataset('y', data=y)
             h.create_dataset('amplitude', data=amplitude, dtype = 'float64')
             h.create_dataset('phase', data=phase, dtype = 'float64')
@@ -1109,7 +1110,7 @@ class Analysis(object):
                         sourcetype = 'Gaussian beam', 
                         y_max = 0., Nb_sources = 1, sim_resolution = 1,
                         linestyle = '-', runtime = 800, aperture_size = 200,
-                        beam_w0 = 10, plot_amp = False, plotname = 'test.png'):
+                        beam_w0 = 10, plot_amp = False, plotname = 'test'):
         """
         Sends gaussian beams (mono or multichromatic) from the image plane and 
         recovers the E-field squared at the aperture. Also plots the electric 
@@ -1184,7 +1185,7 @@ class Analysis(object):
             self.sim.define_source(frequency, 
                                    sourcetype = sourcetype,
                                    x=self.sim.opt_sys.image_plane_pos, y = height, 
-                                   size_x = 0, size_y = 300, 
+                                   size_x = 0, size_y = self.sim.opt_sys.size_y, 
                                    beam_width = beam_w0)
             
             #Runs the sim
@@ -1193,7 +1194,7 @@ class Analysis(object):
             #Gets the complex electric field and adds it to the plot
             E_field = self.sim.plot_beam(plot_amp = plot_amp,
                 filename = plotname,
-                aperture_size = aperture_size)
+                aperture_size = aperture_size, aper_pos_x = self.sim.opt_sys.aper_pos_x)
 
             #Get the FWHM for the field at aperture
             middle_idx = np.int(len(E_field)/2)

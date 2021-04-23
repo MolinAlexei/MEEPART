@@ -1,4 +1,4 @@
-from meep_optics import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, TelescopeTube, Absorber, Sim, Analysis
+from meep_optics3D import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, Sim, Analysis
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse as ap
@@ -6,52 +6,46 @@ import h5py
 from scipy import optimize
 from mpi4py import MPI
     
-coeff = 10 
-
 lens1 = AsphericLens(name = 'Lens 1', 
-                     r1 = 327.365*coeff, 
-                     r2 = np.inf, 
-                     c1 = -0.66067, 
-                     c2 = 0, 
-                     thick = 40*coeff, 
-                     x = (130.+10.)*coeff, 
-                     y = 0., 
-                     diameter = 300*coeff,
-                     AR_left = 5., AR_right = 5.)
+                    r1 = 327.365, 
+                    r2 = np.inf, 
+                    c1 = -0.66067, 
+                    c2 = 0, 
+                    thick = 40, 
+                    x = 10.+130.,
+                    diameter = 300)
     
 lens2 = AsphericLens(name = 'Lens 2', 
-                     r1 = 269.190*coeff, 
-                     r2 = 6398.02*coeff, 
-                     c1 = -2.4029, 
-                     c2 = 1770.36,
-                     thick = 40*coeff,
-                     diameter = 300*coeff, 
-                     x = (40.+130.+369.408+10.)*coeff, 
-                     y = 0.,
-                     AR_left = 5., AR_right = 5.)
-    
+                    r1 = 269.190, 
+                    r2 = 6398.02, 
+                    c1 = -2.4029, 
+                    c2 = 1770.36, 
+                    thick = 40., 
+                    x = 40.+130.+369.408+10.,
+                    diameter = 300)
+
 aperture_stop = ApertureStop(name = 'Aperture Stop',
-                             pos_x = 10*coeff,
-                             diameter = 200*coeff,
-                             thickness = 5*coeff,
-                             n_refr = 1., 
-                             conductivity = 1e7)
+                            pos_x = 10,
+                            diameter = 200,
+                            thickness = 5,
+                            n_refr = 1., 
+                            conductivity = 1e7)
+    
+
     
 image_plane = ImagePlane(name = 'Image Plane',
-                         pos_x = (10+714.704)*coeff,
-                         diameter = 300*coeff,
-                         thickness = 2*coeff,
-                         n_refr = 1, 
-                         conductivity = 0)
+                        pos_x = 10+714.704,
+                        side_size = 300,
+                        thickness = 2,
+                        n_refr = 1., 
+                        conductivity = 0)
 
-tube = TelescopeTube('Tube')
-absorber = Absorber('Absorber')
 
 
 
 def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
     opt_sys = OpticalSystem('test')
-    opt_sys.set_size(750*coeff,300*coeff)
+    opt_sys.set_size(750,300,300)
     opt_sys.add_component(lens1)
     opt_sys.add_component(lens2)
     opt_sys.add_component(aperture_stop)
@@ -59,7 +53,7 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
 
     opt_sys.assemble_system(dpml = dpml, resolution = res)
 
-    opt_sys.write_h5file(parallel = True)
+    #opt_sys.write_h5file()
     
     return opt_sys
 
@@ -67,7 +61,7 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
 
 #PARAMS
 wvl = 10
-resolution = 1
+resolution = 2
 dpml = 5
 
 
@@ -78,7 +72,7 @@ opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, resolution, 
 w0_list = [10., 30., 50.] #np.linspace(10,50,5)
 
 
-legend = ['1', '3', '5']
+legend = ['10', '30', '50']
 
 for k in range(len(w0_list)):
     #RUN SIM
@@ -86,13 +80,10 @@ for k in range(len(w0_list)):
     sim = Sim(opt_sys)
     analysis = Analysis(sim)  
 
-    analysis.image_plane_beams(wavelength = wvl, runtime = 800*coeff, 
-        sim_resolution = resolution, beam_w0 = w0_list[k], 
-        plot_amp = True, plotname = 'w0_{}_wvl1'.format(int(w0_list[k])),
-        aperture_size = 200*coeff) 
+    analysis.image_plane_beams(wavelength = wvl, runtime = 750, sim_resolution = resolution, beam_w0 = w0_list[k], save_amp = True, filename = 'w0_{}_3D'.format(int(w0_list[k]))) 
 
     #PLOT FIELD
-    analysis.sim.plot_efield()
+    #analysis.sim.plot_efield()
 
     #freq, fft = analysis.beam_FT(precision_factor = 15)
 
