@@ -880,7 +880,7 @@ class Sim(object):
     
     
     def run_sim(self, runtime = 0., dpml = None, sim_resolution = 1, 
-            get_mp4 = False, Nfps = 24, movie_name = 'test.mp4', image_every = 5):
+            get_mp4 = False, Nfps = 24, movie_name = 'test.mp4', image_every = 5, filename = 'pouet'):
         """
         Creates the sim environment as defined by MEEP and then runs it.
         
@@ -936,8 +936,8 @@ class Sim(object):
         nfreq = 1
         fcen = 1/self.wavelength
         df = 0
-        n2f_pt = mp.Vector3(-0.5*750+10)
-        n2f_obj = self.sim.add_near2far(fcen, df, nfreq, mp.Near2FarRegion(center=n2f_pt, size = (0,200)))     
+        n2f_pt = mp.Vector3((-0.5*750+10)*10, 0)
+        n2f_obj = self.sim.add_near2far(fcen, df, nfreq, mp.Near2FarRegion(center=n2f_pt, size = (0,2000)))     
 
 
         #n2f_obj = self.sim.add_near2far(self.frequency, 0, 1, mp.Near2FarRegion(center=mp.Vector3(-390), size=mp.Vector3(y=200)))
@@ -960,7 +960,7 @@ class Sim(object):
         ff_lengths = np.linspace(0,ff_length,ff_npts)
         angles = [np.degrees(np.arctan(f)) for f in ff_lengths/ff_distance]
 
-        wvl_slice = 0.5
+
         #idx_slice = np.where(np.asarray(freqs) == 1/wvl_slice)[0][0]
         norm = np.absolute(ff_source['Ez'])/np.max(np.absolute(ff_source['Ez']))
         ff_dB = 10*np.log10(norm)
@@ -976,6 +976,11 @@ class Sim(object):
         plt.title("f.-f. spectra @  λ = 10 mm")
         plt.savefig('FF_test.png')
         plt.close()
+
+        h = h5py.File(filename + '.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
+        h.create_dataset('deg', data=angles)
+        h.create_dataset('amplitudedB', data=ff_dB, dtype = 'float64')
+        h.close()
         
     def plot_system(self):
         
@@ -1239,7 +1244,7 @@ class Analysis(object):
                                    beam_width = beam_w0)
             
             #Runs the sim
-            self.sim.run_sim(runtime = runtime, sim_resolution = sim_resolution)
+            self.sim.run_sim(runtime = runtime, sim_resolution = sim_resolution, filename = plotname)
 
             #Gets the complex electric field and adds it to the plot
             E_field = self.sim.plot_beam(plot_amp = plot_amp,

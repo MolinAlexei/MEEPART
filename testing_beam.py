@@ -7,7 +7,7 @@ import h5py
 from scipy import optimize
 from mpi4py import MPI
     
-coeff = 1
+coeff = 10
 
 lens1 = AsphericLens(name = 'Lens 1', 
                      r1 = 327.365*coeff, 
@@ -60,7 +60,7 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
 
     opt_sys.assemble_system(dpml = dpml, resolution = res)
 
-    opt_sys.write_h5file()
+    opt_sys.write_h5file(parallel = True)
     
     return opt_sys
 
@@ -68,7 +68,7 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
 
 #PARAMS
 wvl = 10
-resolution = 2
+resolution = 1
 dpml = 5
 
 """
@@ -104,14 +104,20 @@ for k in range(len(w0_list)):
 opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, resolution, dpml)
 w0 = 30
 
-sim = Sim(opt_sys)
-analysis = Analysis(sim) 
-analysis.image_plane_beams(wavelength = wvl, runtime = 800*coeff, sim_resolution = resolution, beam_w0 = w0) 
-analysis.sim.plot_efield()
+w0_list = [10., 30., 50.] #np.linspace(10,50,5)
 
-freq, fft = analysis.beam_FT(precision_factor = 15)
 
-analysis.plotting(freq, fft, wvl, deg_range= 40, print_fwhm = True, savefig = True, path_name = 'hey')
+legend = ['1', '3', '5']
+
+for k in range(len(w0_list)):
+    sim = Sim(opt_sys)
+    analysis = Analysis(sim) 
+    analysis.image_plane_beams(wavelength = wvl, runtime = 800*coeff, sim_resolution = resolution, beam_w0 = w0, plotname = 'w0_{}_wvl1'.format(int(w0_list[k]))) 
+    analysis.sim.plot_efield()
+
+#freq, fft = analysis.beam_FT(precision_factor = 15)
+
+#analysis.plotting(freq, fft, wvl, deg_range= 40, print_fwhm = True, savefig = True, path_name = 'hey')
 
 #PLOT BEAM
 #analysis.plotting(freq, FFT_list, wvl, deg_range= 40, print_fwhm = True, savefig = True, path_name = 'testing_w0', legend = legend)
