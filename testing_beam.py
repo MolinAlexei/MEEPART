@@ -1,4 +1,5 @@
 from meep_optics import OpticalSystem, AsphericLens, ApertureStop, ImagePlane, TelescopeTube, Absorber, Sim, Analysis
+import meep as mp
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse as ap
@@ -6,7 +7,7 @@ import h5py
 from scipy import optimize
 from mpi4py import MPI
     
-coeff = 10 
+coeff = 1
 
 lens1 = AsphericLens(name = 'Lens 1', 
                      r1 = 327.365*coeff, 
@@ -59,7 +60,7 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
 
     opt_sys.assemble_system(dpml = dpml, resolution = res)
 
-    opt_sys.write_h5file(parallel = True)
+    opt_sys.write_h5file()
     
     return opt_sys
 
@@ -67,10 +68,10 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
 
 #PARAMS
 wvl = 10
-resolution = 1
+resolution = 2
 dpml = 5
 
-
+"""
 FFT_list = []
 
 
@@ -97,6 +98,20 @@ for k in range(len(w0_list)):
     #freq, fft = analysis.beam_FT(precision_factor = 15)
 
     #FFT_list.append(fft[0])
+"""
+
+#TEST N2FAR
+opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, resolution, dpml)
+w0 = 30
+
+sim = Sim(opt_sys)
+analysis = Analysis(sim) 
+analysis.image_plane_beams(wavelength = wvl, runtime = 800*coeff, sim_resolution = resolution, beam_w0 = w0) 
+analysis.sim.plot_efield()
+
+freq, fft = analysis.beam_FT(precision_factor = 15)
+
+analysis.plotting(freq, fft, wvl, deg_range= 40, print_fwhm = True, savefig = True, path_name = 'hey')
 
 #PLOT BEAM
 #analysis.plotting(freq, FFT_list, wvl, deg_range= 40, print_fwhm = True, savefig = True, path_name = 'testing_w0', legend = legend)

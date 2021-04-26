@@ -913,6 +913,17 @@ class Sim(object):
         self.dpml = dpml
         self.sim_resolution = sim_resolution
 
+
+        ff_distance = 1e8      # far-field distance from near-field monitor
+        ff_angle = 40          # far-field cone angle
+        ff_npts = 500          # number of far-field points
+
+        ff_length = ff_distance*np.tan(np.radians(ff_angle))
+        ff_res = ff_npts/ff_length
+
+        
+
+
         #Defines the simulation environment, using the various objects defined
         #previously
         self.sim = mp.Simulation(cell_size=self.cell,
@@ -920,7 +931,13 @@ class Sim(object):
                     geometry=self.opt_sys.geometry, 
                     sources=self.source,
                     resolution=self.sim_resolution,
-                    epsilon_input_file = 'epsilon_map.h5:eps')     
+                    epsilon_input_file = 'epsilon_map.h5:eps')
+
+        nfreq = 1
+        fcen = 1/self.wavelength
+        df = 0
+        n2f_pt = mp.Vector3(-0.5*750+10)
+        n2f_obj = self.sim.add_near2far(fcen, df, nfreq, mp.Near2FarRegion(center=n2f_pt, size = (0,200)))     
 
 
         #n2f_obj = self.sim.add_near2far(self.frequency, 0, 1, mp.Near2FarRegion(center=mp.Vector3(-390), size=mp.Vector3(y=200)))
@@ -939,7 +956,26 @@ class Sim(object):
         if not get_mp4 :
             self.sim.run(until = runtime)
         
-        #self.oui = abs(self.sim.get_farfields(n2f_obj, 10, center=mp.Vector3(-2000), size=mp.Vector3(y=800))['Ez'])**2
+        ff_source = self.sim.get_farfields(n2f_obj, ff_res, center=mp.Vector3(ff_distance,0.5*ff_length), size=mp.Vector3(y=ff_length))
+        ff_lengths = np.linspace(0,ff_length,ff_npts)
+        angles = [np.degrees(np.arctan(f)) for f in ff_lengths/ff_distance]
+
+        wvl_slice = 0.5
+        #idx_slice = np.where(np.asarray(freqs) == 1/wvl_slice)[0][0]
+        norm = np.absolute(ff_source['Ez'])/np.max(np.absolute(ff_source['Ez']))
+        ff_dB = 10*np.log10(norm)
+
+        plt.figure(figsize = (8,6))
+        plt.plot(angles,ff_dB[:],'bo-')
+        plt.xlim(0,ff_angle)
+        plt.ylim((-60,0))
+        plt.xticks([t for t in range(0,ff_angle+1,10)])
+        plt.xlabel("angle (degrees)")
+        plt.ylabel("amplitude")
+        plt.grid(axis='x',linewidth=0.5,linestyle='--')
+        plt.title("f.-f. spectra @  λ = 10 mm")
+        plt.savefig('FF_test.png')
+        plt.close()
         
     def plot_system(self):
         
