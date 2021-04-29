@@ -13,69 +13,90 @@ import csv
 mp.verbosity(1)
 
 class OpticalSystem(object):
-    """
+    '''
     This class is used to define the optical system, by creating the dielectric
     map associated to the system that can the be used within the simulation 
     class.
-    """
+    '''
     
     def __init__(self, name=''):
         
-        """
-        Give a name to the optical system and initialise a geometry that is 
-        empty by default
-        """
+        '''
+        Sets the size of the optical system,
+        the list of components and list of
+        geometry objects.
+        ---------
+        name : str, optional
+            Name of the system
+        '''
         
         self.name = name
-        self.geometry = None
+        self.geometry = []
         self.components = []
         
     def __str__(self):
-        """
-        Returns the name of the system
-        """
+        '''
+        Returns the name of the system.
+        '''
         return self.name
     
     def set_size(self, size_x, size_y):
-        """
-        Defines the size of the system:
-            - size_x is the size along the optical axis
-            - size_y is the size orthogonal to the optical axis in 2D
-        """
+        '''
+        Sets the size of the optical system
+        ---------
+        size_x : int
+            Size of system on x-axis
+        size_y : int
+            Size of system on y-axis
+        Notes
+        -----
+        The system is always defined to have 
+        the optical axis along the x axis.
+        '''
         
         self.size_x = size_x
         self.size_y = size_y
     
     def add_component(self, component):
-        """
-        Adds a component to the list of components, these components can be :
-            - Lenses
-            - Aparture Stop (x1)
-            - Image Plane
-        """
+        '''
+        Adds the component to the list of objects in the optical system
+        ---------
+        component : component
+            Component object
+        '''
         
         self.components.append(component)
         
     def list_components(self):
-        """
-        Returns the list of components by their names
-        """
+        '''
+        Returns the list of components by their names.
+        '''
         out_str = ''
         for component in self.components:
             out_str += ' {}'.format(component.name)
         return out_str
     
-    def write_lens(self, component, epsilon_map, resolution):
-        # The lens equation returns a sag (distance from plane orth. to
-        # optical axis) as a function of distance from optical axis y,
-        # so the code cycles through the different y to change the 
-        # dielectric map between left surface and right surface
-        
+    def write_lens(self, comp, eps_map, res):
+        '''
+        The lens equation returns a sag (distance from plane orth. to
+        optical axis) as a function of distance from optical axis y,
+        so the code cycles through the different y to change the 
+        dielectric map between left surface and right surface
+        ---------
+        comp : component
+            Lens component object
+        eps_map : 2D or 3D array
+            Dielectric map on which the lens will be written
+        res : float
+            Resolution of map
+        '''
+
         # The y axis has its zero in the middle of the cell, the offset
         # is mid_y
-        mid_y = np.int(self.size_y*resolution/2)
+        mid_y = np.int(self.size_y*res/2)
 
-        thick = component.thick*resolution
+        #Thickness of the lens on optical axis
+        thick = comp.thick*res
 
         #Generate the center of the lumps made by delamination, 
         #different for the left and right surface
@@ -83,62 +104,71 @@ class OpticalSystem(object):
         y0_left = np.random.randint(low = -high, high = high)
         y0_right = np.random.randint(low = -high, high = high)
 
-        radius = np.int(component.diameter*resolution/2)
+        radius = np.int(comp.diameter*res/2)
 
-        if component.surf_err_scale!=0 :
-            nb_bins = int(component.diameter/component.surf_err_width)
-            err_left = np.around(np.random.normal(scale = component.surf_err_scale*resolution, size = nb_bins))
-            err_right = np.around(np.random.normal(scale = component.surf_err_scale*resolution, size = nb_bins))
+        #Generates the bins of random surface errors.
+        if comp.surf_err_scale!=0 :
+            nb_bins = int(comp.diameter/comp.surf_err_width)
+            err_left = np.around(np.random.normal(scale = comp.surf_err_scale*res,
+                                                  size = nb_bins))
+            err_right = np.around(np.random.normal(scale = comp.surf_err_scale*res, 
+                                                   size = nb_bins))
 
-        if component.surf_err_scale == 0:
-            nb_bins = int(component.diameter/component.surf_err_width)
+        if comp.surf_err_scale == 0:
+            nb_bins = int(comp.diameter/comp.surf_err_width)
             err_left = np.zeros(nb_bins)
             err_right = np.zeros(nb_bins)
         
-
+        #Iterates y over the radius, as the lenses are symmetric
+        #abov and below the optical axis
         for y_res in range(radius) :           
             
             #Left surface sag
             x_left = np.int(np.around((
-                        component.left_surface(y_res/resolution) + self.dpml + 
-                        component.x - component.thermal_deformation((y_res+mid_y)/resolution))*resolution))
+                        comp.left_surface(y_res/res) + self.dpml + 
+                        comp.x - comp.cust_def((y_res+mid_y)/res))*res))
             #Right surface sag       
             x_right = np.int(np.around((
-                        component.right_surface(y_res/resolution) + 
-                        component.x + self.dpml)*resolution + 
+                        comp.right_surface(y_res/res) + 
+                        comp.x + self.dpml -
+                        comp.cust_def((y_res+mid_y)/res))*res + 
                         thick))
             
             #Above and below the optical axis :
-            y_positive = self.dpml*resolution + mid_y + y_res
-            y_negative = self.dpml*resolution + mid_y - y_res
+            y_positive = self.dpml*res + mid_y + y_res
+            y_negative = self.dpml*res + mid_y - y_res
 
             #Get the delamination as a function of y on left surface
-            delam_pos_L = np.int(np.around(resolution*
-                component.delamination(y_res/resolution, y0_left)))
-            delam_neg_L = np.int(np.around(resolution*
-                component.delamination(-y_res/resolution, y0_left)))
+            delam_pos_L = np.int(np.around(res*
+                comp.delamination(y_res/res, y0_left)))
+            delam_neg_L = np.int(np.around(res*
+                comp.delamination(-y_res/res, y0_left)))
 
             #Get the delamination as a function of y on right surface
-            delam_pos_R = np.int(np.around(resolution*
-                component.delamination(y_res/resolution, y0_right)))
-            delam_neg_R = np.int(np.around(resolution*
-                component.delamination(-y_res/resolution, y0_right)))
+            delam_pos_R = np.int(np.around(res*
+                comp.delamination(y_res/res, y0_right)))
+            delam_neg_R = np.int(np.around(res*
+                comp.delamination(-y_res/res, y0_right)))
             
             #Gradient in the index
-            radial_slope = component.radial_slope/resolution
-            axial_slope = component.axial_slope/resolution
-            n0 = component.material
-            x0 = np.int(np.around(component.x*resolution))
+            radial_slope = comp.radial_slope/res
+            axial_slope = comp.axial_slope/res
+            eps0 = comp.material
+            x0 = np.int(np.around(comp.x*res))
             x_range = range(x_left, x_right+1) 
-            material_line = [n0 + y_res*radial_slope + (k-x0)*axial_slope for k in x_range]
+            #The value is squared as the permittivity is index squared
+            eps_line = [eps0 + 
+                            (y_res*radial_slope)**2 + 
+                            ((k-x0)*axial_slope)**2 for k in x_range]
 
 
             #Surface error
-            err_left_pos = int(err_left[int(np.around(y_res/resolution/component.surf_err_width))])
-            err_left_neg = int(err_left[- int(np.around(y_res/resolution/component.surf_err_width))])
+            err_bin_idx = int(np.around(y_res/res/comp.surf_err_width))
+            err_left_pos = int(err_left[err_bin_idx])
+            err_left_neg = int(err_left[- np.around(err_bin_idx)])
 
-            err_right_pos = int(err_left[int(np.around(y_res/resolution/component.surf_err_width))]) 
-            err_right_neg = int(err_left[- int(np.around(y_res/resolution/component.surf_err_width))])
+            err_right_pos = int(err_left[err_bin_idx]) 
+            err_right_neg = int(err_left[- err_bin_idx])
 
             x_left_neg = x_left + err_left_neg
             x_left_pos = x_left + err_left_pos
@@ -148,182 +178,156 @@ class OpticalSystem(object):
 
 
             #Write lens between left and right surface below optical axis
-            epsilon_map[x_left_neg : x_right_neg+1, y_negative] *= material_line
+            eps_map[x_left_neg : x_right_neg+1, y_negative] *= eps_line
             
             #So that the center line is not affected twice :
             if y_res != 0 :
                 #Write lens between left and right surface above optical axis
-                epsilon_map[x_left_pos : x_right_pos+1, y_positive] *= material_line
+                eps_map[x_left_pos : x_right_pos+1, y_positive] *= eps_line
             
             #Write AR coating on left surface
-            if component.AR_left is not None :
+            if comp.AR_left is not None :
 
-                AR_thick = np.int(np.around(component.AR_left*resolution))
+                AR_thick = np.int(np.around(comp.AR_left*res))
 
-                epsilon_map[x_left_neg - AR_thick - delam_neg_L: x_left_neg - delam_neg_L, 
-                            y_negative] *= component.AR_material
+                eps_map[x_left_neg - AR_thick - delam_neg_L: x_left_neg - 
+                        delam_neg_L, y_negative] *= comp.AR_material
 
                 if y_res != 0 :
-                    epsilon_map[x_left_pos - AR_thick - delam_pos_L: x_left_pos - delam_pos_L, 
-                                y_positive] *= component.AR_material
+                    eps_map[x_left_pos - AR_thick - delam_pos_L: x_left_pos - 
+                            delam_pos_L, y_positive] *= comp.AR_material
             
             #Write AR coating on right surface                    
-            if component.AR_right is not None :
+            if comp.AR_right is not None :
                 
-                AR_thick = np.int(np.around(component.AR_right*resolution))
+                AR_thick = np.int(np.around(comp.AR_right*res))
 
-                epsilon_map[x_right_neg + 1 + delam_neg_R: AR_thick + x_right_neg + 1 + delam_neg_R, 
-                            y_negative] *= component.AR_material
+                eps_map[x_right_neg + 1 + delam_neg_R: AR_thick + x_right_neg + 
+                        1 + delam_neg_R, y_negative] *= comp.AR_material
 
                 if y_res != 0 :
-                    epsilon_map[x_right_pos + 1 + delam_pos_R: AR_thick + x_right_pos + 1 + delam_pos_R, 
-                                y_positive] *= component.AR_material
+                    eps_map[x_right_pos + 1 + delam_pos_R: AR_thick + 
+                            x_right_pos + 1 + delam_pos_R, 
+                            y_positive] *= comp.AR_material
             
-            
-    
-    def assemble_system(self, resolution = 1, dpml = None):
-        
-        """
+    def assemble_system(self, res = 1, dpml = None):
+        '''
         Creates the map that will be read by the simulation later, as well as
-        the geometry object necessary for an absorbing aperture stop and an 
+        the geometry objects necessary for an absorbing aperture stop and an 
         image plane
-        
-        Inputs : 
-            - resolution : defines how many points/unit of distance, a higher 
+
+        Arguments
+        -----------------
+        res : float, optional
+            Defines how many points/unit of distance, a higher 
             res gives better precision but also longer coomputation
-            - dpml : thickness of the outer absorbing layer
-        """
+        dpml : float, optional
+            Perfectly Matched Layer thickness
         
-        self.resolution = resolution
+        Notes
+        -----
+        The dpml is necessary to make a map that is bigger than the system,
+        so that the PML is outside of the system size provided earlier.
+        '''
+        
+        self.res = res
         self.dpml = dpml
         
         # Define the map size, so that the PML is outside of the working system
-        epsilon_map = np.ones(((self.size_x + 2*dpml)*resolution+1, 
-                               (self.size_y + 2*dpml)*resolution+1), dtype = 'float32') 
+        epsilon_map = np.ones(((self.size_x + 2*dpml)*res+1, 
+                               (self.size_y + 2*dpml)*res+1), dtype = 'float32') 
         
                 
         #Goes through all the components to add them to the system
-        for component in self.components:
+        for comp in self.components:
             
-            #The action is decided with the component type
+            #The action is decided with the comp type
             
             ### LENSES
-            if component.object_type == 'Lens':
+            if comp.object_type == 'Lens':
                 
-                self.write_lens(component, epsilon_map, resolution)
+                self.write_lens(comp, epsilon_map, res)
      
             ### APERTURE STOP
-            elif component.object_type == 'AP_stop':
+            elif comp.object_type == 'AP_stop':
                 
                 #The aperture can be done with 2 blocks in 2D, as follows :
-                c1 = mp.Block(size=mp.Vector3(component.thick, 
-                                              (self.size_y - component.diameter)/2 + dpml, 0),
-                              
-                      center=mp.Vector3(component.x - self.size_x/2, 
-                                        (component.diameter +  self.size_y + 2*dpml)/4, 0),
-                      
-                      material = mp.Medium(epsilon=component.permittivity, 
-                                           D_conductivity = component.conductivity))
+                size = mp.Vector3(comp.thick, 
+                                  (self.size_y - comp.diameter)/2 + dpml, 
+                                  0)
+                center_up = mp.Vector3(comp.x - self.size_x/2, 
+                                (comp.diameter + self.size_y + 2*dpml)/4, 0)
+                center_down = mp.Vector3(comp.x - self.size_x/2, 
+                                -(comp.diameter + self.size_y + 2*dpml)/4, 0)
+
+                up_part = mp.Block(size=size,
+                                   center=center_up,
+                                   material = mp.Medium(epsilon=comp.permittivity, 
+                                           D_conductivity = comp.conductivity))
                 
-                c2 = mp.Block(size=mp.Vector3(component.thick, 
-                                              (self.size_y - component.diameter)/2 + dpml, 0),
-                              
-                      center=mp.Vector3(component.x - self.size_x/2, 
-                                        -(component.diameter + self.size_y + 2*dpml)/4, 0),
-                      
-                      material = mp.Medium(epsilon=component.permittivity, 
-                                           D_conductivity = component.conductivity))
-        
-                
-                self.aper_pos_x = component.x
-                if self.geometry is not None :
-                    #If there are already objects in geometry, adds the aperture
-                    #instead of replacing what was there
-                    
-                    self.geometry.append(c1)
-                    self.geometry.append(c2)
-                    
-                else :
-                    self.geometry = [c1,c2]
+                down_part = mp.Block(size=size,
+                                     center=center_down,
+                                     material = mp.Medium(epsilon=comp.permittivity, 
+                                           D_conductivity = comp.conductivity))
+
+                self.aper_pos_x = comp.x
+                self.geometry.append(up_part)
+                self.geometry.append(down_part)
             
             ### IMAGE PLANE
-            elif component.object_type == 'ImagePlane':
+            elif comp.object_type == 'ImagePlane':
                 
                 #The image plane is just a single plane, made with a block :
-                c1 = mp.Block(size=mp.Vector3(component.thick, component.diameter, 0),
-                      center=mp.Vector3(component.x - self.size_x/2, 0, 0),
-                      material = component.material)
+                block = mp.Block(size=mp.Vector3(comp.thick, comp.diameter, 0),
+                      center=mp.Vector3(comp.x - self.size_x/2, 0, 0),
+                      material = comp.material)
                 
-                self.image_plane_pos = component.x - self.size_x/2
-                if self.geometry is not None :
-                    #If there are already objects in geometry, adds the image
-                    #plane instead of replacing what was there
-                    
-                    self.geometry.append(c1)
-                    
-                else :
-                    self.geometry = [c1]
+                self.image_plane_pos = comp.x - self.size_x/2
+                self.geometry.append(block)
                 
-            elif component.object_type == 'MetallicTube':
+            elif comp.object_type == 'MetallicTube':
 
-                #The aperture can be done with 2 blocks in 2D, as follows :
-                c1 = mp.Block(size=mp.Vector3(self.size_x, component.thick, 0),
-                      center=mp.Vector3(0, component.center, 0),
+                #The telescope tube is 2 blocks :
+                up_part = mp.Block(size=mp.Vector3(self.size_x, comp.thick, 0),
+                      center=mp.Vector3(0, comp.center, 0),
                       material = mp.metal)
                 
-                c3 = mp.Block(size=mp.Vector3(self.size_x, component.thick, 0),
-                      center=mp.Vector3(0, -component.center, 0),
+                down_part = mp.Block(size=mp.Vector3(self.size_x, comp.thick, 0),
+                      center=mp.Vector3(0, -comp.center, 0),
                       material = mp.metal)
                 
-                if self.geometry is not None :
-                    #If there are already objects in geometry, adds the tube
-                    #instead of replacing what was there
-                    
-                    self.geometry.append(c1)
-                    self.geometry.append(c3)
-                    
-                else :
-                    self.geometry = [c1, c3]
+                self.geometry.append(up_part)
+                self.geometry.append(down_part)
+                
 
-            elif component.object_type == 'Absorber':
-                c2 = mp.Block(size=mp.Vector3(self.size_x, component.thick, 0),
-                      center=mp.Vector3(0, component.center, 0),               
-                      material = mp.Medium(epsilon=component.epsilon_real, 
-                                            D_conductivity=component.conductivity))
+            elif comp.object_type == 'Absorber':
+                #The absorber is 2 blocks :
+                up_part = mp.Block(size=mp.Vector3(self.size_x, comp.thick, 0),
+                      center=mp.Vector3(0, comp.center, 0),               
+                      material = mp.Medium(epsilon=comp.epsilon_real, 
+                                            D_conductivity=comp.conductivity))
 
 
-                c4 = mp.Block(size=mp.Vector3(self.size_x, component.thick, 0),
-                      center=mp.Vector3(0, -component.center, 0),               
-                      material = mp.Medium(epsilon=component.epsilon_real, 
-                                            D_conductivity=component.conductivity))
+                down_part = mp.Block(size=mp.Vector3(self.size_x, comp.thick, 0),
+                      center=mp.Vector3(0, -comp.center, 0),               
+                      material = mp.Medium(epsilon=comp.epsilon_real, 
+                                            D_conductivity=comp.conductivity))
 
                 
-                if self.geometry is not None :
-                    #If there are already objects in geometry, adds the absorber
-                    #instead of replacing what was there
-                    
-                    self.geometry.append(c2)
-                    self.geometry.append(c4)
-                    
-                else :
-                    self.geometry = [c2, c4]
+                self.geometry.append(up_part)
+                self.geometry.append(down_part)
+                
+            elif comp.object_type == 'HWP':
+                HWP = mp.Block(center = mp.Vector3(comp.x_pos - self.size_x/2, 0, 0),
+                                size = mp.Vector3(comp.thick, comp.size_y, 0),
+                                material = mp.Medium(epsilon_diag = comp.diag, 
+                                    epsilon_offdiag = comp.offdiag))
 
-            elif component.object_type == 'HWP':
-                HWP = mp.Block(center = mp.Vector3(component.x_pos - self.size_x/2, 0, 0),
-                                size = mp.Vector3(component.thick, component.size_y, 0),
-                                material = mp.Medium(epsilon_diag = component.diag, 
-                                    epsilon_offdiag = component.offdiag))
+                self.geometry.append(HWP)
 
-                if self.geometry is not None :
-                    #If there are already objects in geometry, adds the HWP
-                    #instead of replacing what was there
-                    
-                    self.geometry.append(HWP)
-                    
-                else :
-                    self.geometry = [HWP]
-
-            elif component.object_type == 'PrismsTube':
+            """
+            #THIS IS A TEMPORARY TEST
+            elif comp.object_type == 'PrismsTube':
 
                 vertices_up = [mp.Vector3(-1.5,0),
                             mp.Vector3(1.5,0),
@@ -358,33 +362,51 @@ class OpticalSystem(object):
 
                 self.geometry.append(c1)
                 self.geometry.append(c2)
-
+            """
             
         self.permittivity_map = epsilon_map
 
     def make_lens_bubbles(self, radius, nb_clusters, nb_per_cluster, r_factor = 1):
-
-        """
+        '''
         Introduces clusters of air bubbles inside the lenses of the system, 
         each cluster has a central bubble and a number of smaller bubble gathered
         around this central bubble
         
-        Inputs : 
-            - radius : radius of the central bubble
-            - nb_clusters : number of clusters per lens
-            - nb_per_cluster : number of bubbles surrounding the main one in each
+        Arguments
+        -----------------
+        radius : float
+            Radius of the central bubble
+        nb_clusters : float
+            Number of clusters per lens
+        nb_per_cluster : 
+            Number of bubbles surrounding the main one in each
             cluster
-            - r_factor : the factor by which the radii are multiplied, allows for the 
-            investigation of bubble size only
-
-        Affects the self.permittivity_map object.
-        """
+        Notes
+        -----
+        This function alters the permittivity map. 
+        '''
 
         res = self.resolution
 
-        #Function, given a radius, that returns the indices of the points within 
+        #Function which, given a radius, that 
+        #returns the indices of the points within 
         #the circle centered on (0,0)
         def bubble(rad):
+            '''
+            Introduces clusters of air bubbles inside the lenses of the system, 
+            each cluster has a central bubble and a number of smaller bubble gathered
+            around this central bubble
+        
+            Arguments
+            -----------------
+            rad : float
+                Radius of the bubble
+
+            Returns
+            -------
+            bubble : array
+                Array of indexes within radius
+            '''
             bubble = []
             for k in range(-rad, rad+1):
                 for j in range(-rad, rad+1):
@@ -406,7 +428,8 @@ class OpticalSystem(object):
                 #Lens thickness
                 thick = component.thick*res
 
-                #So that the bubbles aren't generated on the very edge of the lenses
+                #So that the bubbles aren't generated 
+                #on the very edge of the lenses
                 low = np.int(np.around(self.size_y*res*0.1))
                 high = np.int(np.around(self.size_y*res*0.9))
 
@@ -471,60 +494,93 @@ class OpticalSystem(object):
         #Update the map
         for index in list_all : 
             self.permittivity_map[index[0], index[1]] = 1
-
-
-
-            
+      
     def plot_lenses(self):
-        #Only plots the lenses, allows to check their dispostion and shape
-        
+        '''
+        Plots the permittivity map, where we can see only the lenses,
+        allows to check their dispostion and shape
+        '''
+        extent = (0, 
+                  len(self.permittivity_map[:])/self.res
+                  0,
+                  len(self.permittivity_map[:,0]))/self.res
         plt.figure(figsize = (15,15))
-        plt.imshow(self.permittivity_map.transpose())
-        plt.savefig('lenses')
+        plt.title('Permittivity map')
+        plt.imshow(self.permittivity_map.transpose(), extent = extent)
+        plt.savefig('Lenses.png')
         plt.close()
         
-    def write_h5file(self, parallel = False):
-        #Writes the file that will then be read within the sim function
-        
+    def write_h5file(self, parallel = False, filename = 'epsilon_map'):
+        '''
+        Writes the file that will then be 
+        read within the MEEP simulation
+
+        Arguments
+        ---------
+        parallel : bool, optional
+            If the computation is run in parallel
+        filename : str, optional
+            Name of the permittivity map file written. 
+            Needs to be the same name given to the MEEP simulation
+        '''
         if parallel : 
             comm = MPI.COMM_WORLD
             rank = comm.rank
 
-            h = h5py.File('epsilon_map.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
+            h = h5py.File(filename + '.h5', 'w', 
+                          driver ='mpio', 
+                          comm=MPI.COMM_WORLD)
         
             size_x = len(self.permittivity_map[:,0])
             size_y = len(self.permittivity_map[0,:])
-            dset = h.create_dataset('eps', (size_x, size_y), dtype = 'float32', compression = "gzip")
+            dset = h.create_dataset('eps', (size_x, size_y), 
+                                    dtype = 'float32', 
+                                    compression = "gzip")
             with dset.collective :
                 dset[:,:] = self.permittivity_map
         
             h.close()
 
         elif not parallel :
-            h = h5py.File('epsilon_map.h5', 'w')
-            dset = h.create_dataset('eps', data = self.permittivity_map)
+            h = h5py.File(filename + '.h5', 'w')
+            dset = h.create_dataset('eps', data = self.permittivity_map, 
+                                           compression = "gzip")
             h.close()
+                
+    def sys_info(self, dist_unit, wvl = None, meep_freq = None, real_freq = 100):
+        '''
+        Writes the file that will then be 
+        read within the MEEP simulation
 
-        #self.permittivity_map = 0
-        
-    def delete_h5file(self):
-        #Deletes the h5 file, can be useful when the file is heavy and not to 
-        #be kept after simulation
-        
-        file = glob.glob('epsilon_map.h5')
-        os.remove(file[0])
-        
-    def sys_info(self, wavelength = None, frequency = None):
+        Arguments
+        ---------
+        dist_unit : float
+            Chosen ratio between MEEP distances and real distance 
+        wvl : float, optional
+            Wavelength in MEEP units
+        meep_freq : float, optional
+            Frequency in MEEP units
+        real_freq : float, optional
+            Frequency in Hz
+        '''
 
         c = 299792458.0
-        if wavelength is not None :
-           frequency = 1/wavelength
+        if wvl is not None :
+           meep_freq = 1/wvl
+           real_freq = c*meep_freq/dist_unit
 
-        if frequency is not None:
-            wavelength = 1/frequency
+        if real_freq is not None:
+            wvl = c/real_freq/dist_unit
 
-        print('System size = {} x {} wavelengths'.format(self.size_x/wavelength, 
+
+
+        print('Wavelength = {:.2e}'.format(wvl*dist_unit))
+        print('System size = {:.0f} x {:.0f} wavelengths'.format(self.size_x/wavelength, 
                                                         self.size_y/wavelength))
+        print('System size = {:.0f} x {:.0f} m'.format(self.size_x/self.res, 
+                                                        self.size_y/wavelength))
+        print('Real frequency = {:.2e} Hz')
+        print('MEEP frequency = {:.2e}'.format(meep_freq))
 
 
 class TelescopeTube(object):
@@ -614,7 +670,7 @@ class AsphericLens(object):
         self.surf_err_width = surf_err_width    #SURFACE ERROR WIDTH
         self.surf_err_scale = surf_err_scale    #SURFACE ERROR SCALE
 
-        self.therm_def = therm_def      #ENABLES THERMAL DEFORMATION
+        self.custom_def = custom_def      #ENABLES CUSTOM SURFACE DEFORMATION
 
         deform = []
 
@@ -675,14 +731,11 @@ class AsphericLens(object):
         return np.abs(min((((y-y0)/width)**2-1)*thick, 0))
 
 
-    def thermal_deformation(self, y):
+    def cust_def(self, y):
  
-        if self.therm_def :
-            x = np.linspace(0,300, len(self.deform))
-
-            interp_surf = np.interp(y, x, self.deform)
-
-            return interp_surf
+        if self.custom_deformation :
+            #Insert here the custom function
+            return 0
 
         else :
             return 0
@@ -936,8 +989,8 @@ class Sim(object):
         nfreq = 1
         fcen = 1/self.wavelength
         df = 0
-        n2f_pt = mp.Vector3((-0.5*750+10)*10, 0)
-        n2f_obj = self.sim.add_near2far(fcen, df, nfreq, mp.Near2FarRegion(center=n2f_pt, size = (0,2000)))     
+        n2f_pt = mp.Vector3(-self.opt_sys.size_x/2+self.opt_sys.aper_pos_x, 0)
+        n2f_obj = self.sim.add_near2far(fcen, df, nfreq, mp.Near2FarRegion(center=n2f_pt, size = (0,2000*self.sim_resolution)))     
 
 
         #n2f_obj = self.sim.add_near2far(self.frequency, 0, 1, mp.Near2FarRegion(center=mp.Vector3(-390), size=mp.Vector3(y=200)))
@@ -974,7 +1027,7 @@ class Sim(object):
         plt.ylabel("amplitude")
         plt.grid(axis='x',linewidth=0.5,linestyle='--')
         plt.title("f.-f. spectra @  λ = 10 mm")
-        plt.savefig('FF_test.png')
+        plt.savefig(filename + '.png')
         plt.close()
 
         h = h5py.File(filename + '.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
@@ -1002,7 +1055,7 @@ class Sim(object):
         plt.show()
         plt.close()
     
-    def plot_efield(self, path = '.', comp = 'Ez') :
+    def plot_efield(self, name = 'efield', comp = 'Ez') :
 
         #Makes a plot of the Ez component of the electric field in the system
         
@@ -1021,7 +1074,7 @@ class Sim(object):
         plt.plot(x, y, c = 'green', linewidth = 3)
         plt.xlabel('x')
         plt.ylabel('y')
-        plt.savefig('{}/efield'.format(path))
+        plt.savefig(name + '.png')
         plt.show()
         plt.close()
 
@@ -1076,7 +1129,7 @@ class Sim(object):
         timestep = .3
 
         #50 steps Is roughly enough to give a few periods for wavelengths from 1 to 10
-        n_iter = 150
+        n_iter = 120
         
         #Get the real field at aperture
         efield = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0), 

@@ -17,8 +17,7 @@ lens1 = AsphericLens(name = 'Lens 1',
                      thick = 40*coeff, 
                      x = (130.+10.)*coeff, 
                      y = 0., 
-                     diameter = 300*coeff,
-                     AR_left = 5., AR_right = 5.)
+                     diameter = 300*coeff)
     
 lens2 = AsphericLens(name = 'Lens 2', 
                      r1 = 269.190*coeff, 
@@ -28,8 +27,7 @@ lens2 = AsphericLens(name = 'Lens 2',
                      thick = 40*coeff,
                      diameter = 300*coeff, 
                      x = (40.+130.+369.408+10.)*coeff, 
-                     y = 0.,
-                     AR_left = 5., AR_right = 5.)
+                     y = 0.)
     
 aperture_stop = ApertureStop(name = 'Aperture Stop',
                              pos_x = 10*coeff,
@@ -68,7 +66,7 @@ def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
 
 #PARAMS
 wvl = 10
-resolution = 1
+resolution = 3
 dpml = 5
 
 """
@@ -99,22 +97,31 @@ for k in range(len(w0_list)):
 
     #FFT_list.append(fft[0])
 """
+opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, resolution, dpml)
+
+sim = Sim(opt_sys)
+analysis = Analysis(sim) 
+analysis.image_plane_beams(wavelength = 10, runtime = 800*coeff, sim_resolution = 3, beam_w0 = 30, plotname = 'FF_w0_3x_wvl1_res3') 
+analysis.sim.plot_efield('test_FF_wvl3_res033')
+
 
 #TEST N2FAR
+"""
 opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, resolution, dpml)
 w0 = 30
 
-w0_list = [10., 30., 50.] #np.linspace(10,50,5)
-
+w0_list = [30., 90., 150.,300.] #np.linspace(10,50,5)
+wvls = [10,30,50,100]
 
 legend = ['1', '3', '5']
 
 for k in range(len(w0_list)):
     sim = Sim(opt_sys)
     analysis = Analysis(sim) 
-    analysis.image_plane_beams(wavelength = wvl, runtime = 800*coeff, sim_resolution = resolution, beam_w0 = w0, plotname = 'w0_{}_wvl1'.format(int(w0_list[k]))) 
-    analysis.sim.plot_efield()
+    analysis.image_plane_beams(wavelength = wvls[k], runtime = 800*coeff, sim_resolution = resolution, beam_w0 = w0_list[k], plotname = 'FF_w0_3x_wvl{}'.format(int(wvls[k]/10))) 
+    analysis.sim.plot_efield('test_FF_{}'.format(int(wvls[k]/10)))
 
+"""
 #freq, fft = analysis.beam_FT(precision_factor = 15)
 
 #analysis.plotting(freq, fft, wvl, deg_range= 40, print_fwhm = True, savefig = True, path_name = 'hey')
