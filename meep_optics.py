@@ -25,9 +25,11 @@ class OpticalSystem(object):
         Sets the size of the optical system,
         the list of components and list of
         geometry objects.
+
+        Arguments
         ---------
         name : str, optional
-            Name of the system
+            Name of the system (default : '')
         '''
         
         self.name = name
@@ -153,7 +155,7 @@ class OpticalSystem(object):
             #Gradient in the index
             radial_slope = comp.radial_slope/res
             axial_slope = comp.axial_slope/res
-            eps0 = comp.material
+            eps0 = comp.eps
             x0 = np.int(np.around(comp.x*res))
             x_range = range(x_left, x_right+1) 
             #The value is squared as the permittivity is index squared
@@ -210,7 +212,7 @@ class OpticalSystem(object):
                             x_right_pos + 1 + delam_pos_R, 
                             y_positive] *= comp.AR_material
             
-    def assemble_system(self, res = 1, dpml = None):
+    def assemble_system(self, res, dpml):
         '''
         Creates the map that will be read by the simulation later, as well as
         the geometry objects necessary for an absorbing aperture stop and an 
@@ -218,10 +220,10 @@ class OpticalSystem(object):
 
         Arguments
         -----------------
-        res : float, optional
+        res : float
             Defines how many points/unit of distance, a higher 
             res gives better precision but also longer coomputation
-        dpml : float, optional
+        dpml : float
             Perfectly Matched Layer thickness
         
         Notes
@@ -255,9 +257,9 @@ class OpticalSystem(object):
                 size = mp.Vector3(comp.thick, 
                                   (self.size_y - comp.diameter)/2 + dpml, 
                                   0)
-                center_up = mp.Vector3(comp.x - self.size_x/2, 
+                center_up = mp.Vector3(comp.x, 
                                 (comp.diameter + self.size_y + 2*dpml)/4, 0)
-                center_down = mp.Vector3(comp.x - self.size_x/2, 
+                center_down = mp.Vector3(comp.x, 
                                 -(comp.diameter + self.size_y + 2*dpml)/4, 0)
 
                 up_part = mp.Block(size=size,
@@ -271,6 +273,7 @@ class OpticalSystem(object):
                                            D_conductivity = comp.conductivity))
 
                 self.aper_pos_x = comp.x
+                self.aper_size = comp.diameter
                 self.geometry.append(up_part)
                 self.geometry.append(down_part)
             
@@ -279,10 +282,10 @@ class OpticalSystem(object):
                 
                 #The image plane is just a single plane, made with a block :
                 block = mp.Block(size=mp.Vector3(comp.thick, comp.diameter, 0),
-                      center=mp.Vector3(comp.x - self.size_x/2, 0, 0),
+                      center=mp.Vector3(comp.x, 0, 0),
                       material = comp.material)
                 
-                self.image_plane_pos = comp.x - self.size_x/2
+                self.IP_pos = comp.x
                 self.geometry.append(block)
                 
             elif comp.object_type == 'MetallicTube':
@@ -318,7 +321,7 @@ class OpticalSystem(object):
                 self.geometry.append(down_part)
                 
             elif comp.object_type == 'HWP':
-                HWP = mp.Block(center = mp.Vector3(comp.x_pos - self.size_x/2, 0, 0),
+                HWP = mp.Block(center = mp.Vector3(comp.x_pos, 0, 0),
                                 size = mp.Vector3(comp.thick, comp.size_y, 0),
                                 material = mp.Medium(epsilon_diag = comp.diag, 
                                     epsilon_offdiag = comp.offdiag))
@@ -366,7 +369,7 @@ class OpticalSystem(object):
             
         self.permittivity_map = epsilon_map
 
-    def make_lens_bubbles(self, radius, nb_clusters, nb_per_cluster, r_factor = 1):
+    def make_lens_bubbles(self, radius, nb_clusters, nb_per_cluster):
         '''
         Introduces clusters of air bubbles inside the lenses of the system, 
         each cluster has a central bubble and a number of smaller bubble gathered
@@ -481,7 +484,6 @@ class OpticalSystem(object):
 
         list_centers = np.array(list_centers)
         list_radii = np.array(list_radii)
-        list_radii *= r_factor
         list_all = []
 
         #Making bubbles for all centers and radii
@@ -503,7 +505,7 @@ class OpticalSystem(object):
         extent = (0, 
                   len(self.permittivity_map[:])/self.res
                   0,
-                  len(self.permittivity_map[:,0]))/self.res
+                  len(self.permittivity_map[:,0])/self.res)
         plt.figure(figsize = (15,15))
         plt.title('Permittivity map')
         plt.imshow(self.permittivity_map.transpose(), extent = extent)
@@ -518,10 +520,11 @@ class OpticalSystem(object):
         Arguments
         ---------
         parallel : bool, optional
-            If the computation is run in parallel
+            If the computation is run in parallel (default : False)
         filename : str, optional
             Name of the permittivity map file written. 
             Needs to be the same name given to the MEEP simulation
+            (default : 'epsilon_map')
         '''
         if parallel : 
             comm = MPI.COMM_WORLD
@@ -547,7 +550,7 @@ class OpticalSystem(object):
                                            compression = "gzip")
             h.close()
                 
-    def sys_info(self, dist_unit, wvl = None, meep_freq = None, real_freq = 100):
+    def sys_info(self, dist_unit, wvl = None, meep_freq = None, real_freq = None):
         '''
         Writes the file that will then be 
         read within the MEEP simulation
@@ -557,11 +560,11 @@ class OpticalSystem(object):
         dist_unit : float
             Chosen ratio between MEEP distances and real distance 
         wvl : float, optional
-            Wavelength in MEEP units
+            Wavelength in MEEP units (default : None)
         meep_freq : float, optional
-            Frequency in MEEP units
+            Frequency in MEEP units (default : None)
         real_freq : float, optional
-            Frequency in Hz
+            Frequency in Hz (default : None)
         '''
 
         c = 299792458.0
@@ -582,38 +585,125 @@ class OpticalSystem(object):
         print('Real frequency = {:.2e} Hz')
         print('MEEP frequency = {:.2e}'.format(meep_freq))
 
-
 class TelescopeTube(object):
-    def __init__(self, name ='', thick = 5, center = 157.5):
+    '''
+    Class defining a telescope tube.
+    '''
+    def __init__(self, name = None, thick, center):      
+        '''
+        Defines the attributes of the telescope tube object
 
+        Arguments
+        ---------
+        name : str, optional
+            Name of object (default : None)
+        thick : float
+            Thickness of the tube walls
+        center : float
+            Center of the tube walls along the y-axis
+            Needs to account for half a thickness
+        '''
         self.name = name                        #NAME OF OBJECT
         self.object_type = 'MetallicTube'       #OBJECT TYPE
         self.thick = thick                      #TUBE THICKNESS
         self.center = center                    #DISTANCE OF CENTER FROM OPTICAL AXIS
 
+    def __str__(self):
+        if self.name is not None :
+            return self.name + ', thickness ' + str(self.thick)  
+        else :
+            return 'Metallic tube, thickness ' + str(self.thick) 
 
 class Absorber(object):
-    def __init__(self, name ='', thick = 5, center = 157.5,
+    '''
+    Class defining a wall made of absorbing material.
+    '''
+    def __init__(self, name = None, thick, center,
                 epsilon_real = 3.5, epsilon_imag = 0.11025, freq = 1/3):
+        '''
+        Defines the attributes of the absorber object
 
-        self.name = name                        #NAME OF OBJECT
-        self.object_type = 'Absorber'           #OBJECT TYPE
-        self.thick = thick                      #TUBE THICKNESS
-        self.center = center                    #DISTANCE OF CENTER FROM OPTICAL AXIS
-        self.epsilon_real = epsilon_real            #REAL PART OF PERMITTIVITY
-        self.epsilon_imag = epsilon_imag            #COMPLEX PART OF PERMITTIVITY
-        self.freq = freq                        #OPERATING FREQUENCY
-        self.conductivity = epsilon_imag*2*np.pi*freq/epsilon_real #CONDUCTIVITY FOR MEEP
+        Arguments
+        ---------
+        name : str, optional
+            Name of object (default : None)
+        thick : float
+            Thickness of the tube walls 
+        center : float
+            Center of the tube walls along the y-axis
+            Needs to account for half a thickness
+        epsilon_real : float, optional 
+            Real part of the permittivity of the material (default : 3.5)
+        epsilon_imag : float, optional
+            Imaginary part, i.e. conductivity, of the material 
+            (default : 0.11025)
+        freq : float, optional
+            Frequency at which the sim will be run.
+            Needed to set the material property accordingly (default : 0.33)
 
+        Notes
+        -----
+        The values given are set by default to be ECCOSORB CR110 @ 100 GHz
+        -> eps_real = 3.5, eps_imag = 0.11025, freq = 1/3
+        When meep units distance is mm.
+        '''
 
-        #ECCOSORB CR110 @ 100 GHz : eps_real = 3.5, eps_imag = 0.11025, freq = 1/3
+        self.name = name                        
+        self.object_type = 'Absorber'           
+        self.thick = thick                      
+        self.center = center                    
+        self.epsilon_real = epsilon_real            
+        self.epsilon_imag = epsilon_imag            
+        self.freq = freq                        
+        self.conductivity = epsilon_imag*2*np.pi*freq/epsilon_real
+
+    def __str__(self):
+        if self.name is not None :
+            return self.name + ', thickness ' + str(self.thick)
+        else :
+            return 'Absorber walls, thickness ' + str(self.thick)
 
 class HalfWavePlate(object):
-    def __init__(self, name = '', fast_ax_index = 3.019, slow_ax_index = 3.336, thick = 5, x_pos = 0, size_y = 300, theta = np.pi/4):
+    '''
+    Class defining a Half Wave Plate.
+    '''
+    def __init__(self, name = '', fast_ax_index = 3.019, slow_ax_index = 3.336, 
+                thick = 5, x_pos = 0, size_y = 300, theta = 45):
+        '''
+        Defines the attributes of the HWP object
+
+        Arguments
+        ---------
+        name : str, optional
+            Name of object
+        fast_ax_index : float, optional
+            Index of fast axis (default : 3.019)
+        slow_ax_index : float, optional
+            Index of slow axis (default : 3.336)
+        thick : float, optional
+            Thickness of the plate (default : 5)
+        x_pos : float, optional
+            Position along x of the center of the plate (default : 0)
+        size_y : float, optional
+            Size of the plate along y axis (default : 300)
+        theta : float, optional
+            Angle at which the fast axis is rotated in degrees
+            around x-axis, 0 deg being // to y axis.
+            (default : 45)
+
+        Notes
+        -----
+        The values given are set by default to be a saphire 
+        plate with fast axis is 45 degrees from y axis. 
+        '''
+
+        #Permittivity is index squared
         eps_0 = fast_ax_index**2
         eps_e = slow_ax_index**2
 
         self.object_type = 'HWP'
+        #Permittivity matrix rotated by theta
+        theta = np.radians(theta)
         self.diag = mp.Vector3(eps_0, 
                         eps_0*(np.cos(theta)**2) + eps_e*(np.sin(theta)**2), 
                         eps_0*(np.sin(theta)**2) + eps_e*(np.cos(theta)**2))
@@ -621,21 +711,26 @@ class HalfWavePlate(object):
         self.thick = thick
         self.x_pos = x_pos
         self.size_y = size_y
-        
 
+    def __str__(self):
+        if self.name is not None :
+            return self.name + ', thickness ' + str(self.thick) + 
+            ', rotated by ' + str(self.theta) + 'degrees'
+        else :
+            return 'Absorber walls, thickness ' + str(self.thick) + 
+            ', rotated by ' + str(self.theta) + 'degrees'
+        
 class AsphericLens(object):
-    """
-    This class is used to define an aspheric lens of arbitrary shape and 
-    position, and creates the function of sag (curvature) that is used to create 
-    the permitttivity map
-    """
+    '''
+    Class defining an aspheric lens of arbitrary shape and 
+    position, and creating the function of sag (curvature) 
+    used to create the permitttivity map
+    '''
     
-    def __init__(self, name = '',
-                diameter = 300, 
-                 r1=None, r2=None, 
-                 c1=None, c2=None, 
-                 thick=None, 
-                 x=0., y=0., 
+    def __init__(self, diameter, r1, r2, thick,
+                 c1 = 0, c2 = 0, 
+                 name = None, 
+                 x = 0., y = 0., 
                  n_refr = 1.52, 
                  AR_left = None, AR_right = None,
                  delam_thick = 0,
@@ -645,35 +740,82 @@ class AsphericLens(object):
                  surf_err_width = 1,
                  surf_err_scale = 0,
                  therm_def = False):
-        
-        self.name = name                #NAME OF LENS  
-        self.diameter = diameter        #DIAM
-        self.r1 = r1                    #LEFT SURFACE RADIUS
-        self.r2 = r2                    #RIGHT SURFACE RADIUS
-        self.c1 = c1                    #LEFT SURFACE ASPHERIC PARAMETER
-        self.c2 = c2                    #RIGHT SURFACE ASPHERIC PARAMETER
-        self.thick = thick              #THICKNESS AT CENTER
-        self.x = x                      #X POSITION OF LEFT SURFACE CENTER
-        self.y = y                      #Y POSITION OF LEFT SURFACE CENTER
-        self.material = n_refr**2       #DIELECTRIC PERMITTIVITY
-        self.object_type = 'Lens'       #OBJECT TYPE
+        '''
+        Defines the attributes of the Lens object
 
-        self.AR_left = AR_left          #LEFT AR COATING THICKNESS
-        self.AR_right = AR_right        #RIGHT AR COATING THICKNESS
-        self.AR_material = n_refr       #AR COATING PERMITTIVITY
-        self.delam_thick = delam_thick  #AR COATING DELAMINATION THICKNESS
-        self.delam_width = delam_width  #DELAMINATION LUMP THICKNESS
+        Arguments
+        ---------       
+        diameter : float 
+            Diameter of the lens
+        r1 : float
+            Left surface curvature radius
+        r2 : float  
+            Right surface cruvature radius
+        thick : float
+            Thickness of lens on the optical axis
+        name : str, optional
+            Name of object (default : None)
+        c1 : float, optional
+            Left surface aspheric parameter (default : 0)
+        c2 : float, optional
+            Right surface aspheric parameter (default : 0)
+        x : float, optional
+            Position of center of left surface along x axis (default : 0)
+        y : float, optional
+            Position of center of left surface along y axis (default : 0)
+        n_refr : float, optional
+            Index of refraction of the lens. 
+            Set to HDPE by default.
+            (default : 1.52) 
+        AR_left : float, optional
+            Anti Reflection coating thickness of left surface of the lens
+            (default : None) 
+        AR_right : float, optional
+            Anti Reflection coating thickness of right surface of the lens
+            (default : None) 
+        delam_thick : float, optional
+            Thickness of delaminated lumps at their center
+            (default : 0)
+        delam_width : float, optional
+            Width of delaminated lumps along y-axis
+            Used in a division, hence default is not 0.
+            (default : 10)
+        radial_slope : float, optional
+            Derivative of the index of refraction w.r.t y-axis (default : 0)
+        axial_slope : float, optional
+            Derivative of the index of refraction w.r.t x-axis (default : 0)
+        surf_err_scale : float, optional
+            Width of the gaussian of the distribution of surface errors
+            (default : 0)
+        surf_err_width : float, optional
+            Size of the bins of same surface error (default : 1)
+        custom_def : bool, optional 
+            Enables custom deformation function (default : False) 
+        '''
+        self.name = name                  
+        self.diameter = diameter        
+        self.r1 = r1                    
+        self.r2 = r2                    
+        self.c1 = c1                    
+        self.c2 = c2                    
+        self.thick = thick              
+        self.x = x                      
+        self.y = y                      
+        self.eps = n_refr**2            
+        self.object_type = 'Lens'       
+        self.AR_left = AR_left          
+        self.AR_right = AR_right        
+        self.AR_material = n_refr       
+        self.delam_thick = delam_thick  
+        self.delam_width = delam_width  
+        self.radial_slope = radial_slope
+        self.axial_slope = axial_slope  
+        self.surf_err_width = surf_err_width    
+        self.surf_err_scale = surf_err_scale    
+        self.custom_def = custom_def      
 
-        self.radial_slope = radial_slope#RADIAL GRADIENT IN THE INDEX
-        self.axial_slope = axial_slope  #AXIAL GRADIENT IN THE INDEX
-
-        self.surf_err_width = surf_err_width    #SURFACE ERROR WIDTH
-        self.surf_err_scale = surf_err_scale    #SURFACE ERROR SCALE
-
-        self.custom_def = custom_def      #ENABLES CUSTOM SURFACE DEFORMATION
-
-        deform = []
-
+        #TESTING IMPORTED DEFORMED PROFILE AS CSV
+        #deform = []
         #with open('deformedsurface.csv') as csvfile:
         #    reader = csv.reader(csvfile, delimiter=',')
         #    k = 0
@@ -681,27 +823,25 @@ class AsphericLens(object):
         #        k+= 1 
         #        if k>=11 :
         #            deform.append(np.float(row[2]))
-
         #deform0 = 2*deform[0]-deform[1]
         #deform.insert(0, deform0)
-        self.deform = deform
+        #self.deform = deform
 
     
     def left_surface(self, y):
-        """
-        Aspheric lens equation
+        '''
+        Aspheric lens equation for left surface
 
-        Parameters
-        ----------
-        y : STR OR LIST
+        Arguments
+        ---------
+        y : float
             Distance from optical axis at which the sag is computed
 
         Returns
         -------
-        STR OR LIST
+        sag : float
             Sag at at distance y from optical axis.
-
-        """
+        '''
         
         if self.r1 != np.inf :
             return (y**2/self.r1) / (1 + np.sqrt(1 - (1+ self.c1)*y**2/self.r1**2))
@@ -710,9 +850,19 @@ class AsphericLens(object):
             return 0
     
     def right_surface(self, y):
-        """
-        Same as left_surface(self,y)
-        """
+        '''
+        Aspheric lens equation for right surface
+
+        Arguments
+        ---------
+        y : float
+            Distance from optical axis at which the sag is computed
+
+        Returns
+        -------
+        sag : float
+            Sag at at distance y from optical axis.
+        '''
         
         if self.r2 != np.inf :
             return (y**2/self.r2) / (1 + np.sqrt(1 - (1+ self.c2)*y**2/self.r2**2))
@@ -720,64 +870,140 @@ class AsphericLens(object):
             #If the radius is infinite, returns a flat surface, i.e. 0 sag
             return 0
 
-    def delamination(self, y, y0):
+    def delamination(self, y, y0):       
+        '''
+        Returns the air layer thickness that makes delamination, it is 
+        zero everywhere excpet where there's the lump, centered on y0, defined by
+        its width and thickness
 
-        #Returns the air layer thickness that makes delamination, it is 
-        #zero everywhere excpet where there's the lump, centered on y0, defined by
-        #its width and thickness
+        Arguments
+        ---------
+        y : float
+            Distance from optical axis at which 
+            the delamination is evaluated
+        y0 : float
+            Center of the delaminated lump
+        Returns
+        -------
+        delam : float
+            Delamination layer thickness along x-axis at y
+        '''
 
         thick = self.delam_thick
         width = self.delam_width
         return np.abs(min((((y-y0)/width)**2-1)*thick, 0))
 
-
     def cust_def(self, y):
- 
+        '''
+        Returns custom deformation function
+
+        Arguments
+        ---------
+        y : float
+            Distance from optical axis at which 
+            the deformation is evaluated
+        Returns
+        -------
+        deform : float
+            Deformation of surface along x-axis at y
+        '''
         if self.custom_deformation :
             #Insert here the custom function
             return 0
 
         else :
             return 0
-        
 
-    
+    def __str__(self):
+        if self.name is not None : 
+            return self.name + ' at position ' + str(self.pos_x)
+        else :
+            return 'Lens at position ' + str(self.pos_x)
+          
 class ApertureStop(object):
-    """
-    Defines an aperture stop of arbitrary position, material and size
-    """
+    '''
+    Class defining an aperture stop
+    '''
 
-    def __init__(self, name = '', 
-                 diameter = None, 
-                 pos_x = None, 
-                 thickness = None, 
-                 n_refr  = None, 
-                 conductivity = None):
-        
-        self.name = name                #NAME OF APERTURE STOP
-        self.thick = thickness          #THICKNESS OF AP STOP
-        self.x = pos_x                  #POSITION ON OPTICAL AXIS
-        self.diameter = diameter        #DIAMETER OF AP ASTOP
-        self.permittivity = n_refr**2    #INDEX OF MATERIAL
-        self.conductivity = conductivity #CONDUCTIVITY
+    def __init__(self,
+                 diameter, 
+                 pos_x, 
+                 thickness, 
+                 n_refr = 1, 
+                 conductivity = 1e7,
+                 name = None):
+        '''
+        Defines the attributes of the aperture stop object
+
+        Arguments
+        ---------       
+        diameter : float 
+            Diameter of the aperture stop opening
+        pos_x : float
+            Position of the aperture stop along x-axis
+        thickness : float
+            Thickness of aperture stop slab
+        n_refr : float, optional 
+            Index of refraction of the material 
+            if the stop is dielectric
+            (default = 1)
+        conductivity : float, optional
+            Conductivity of the material (default = 1e7)
+        name : str, optional
+            Name of object (default : None)
+        '''
+
+        self.name = name                
+        self.thick = thickness          
+        self.x = pos_x                  
+        self.diameter = diameter        
+        self.permittivity = n_refr**2   
+        self.conductivity = conductivity
         self.object_type = 'AP_stop'
 
-class ImagePlane(object):
-    """
-    Defines an image plane of arbitrary position, material and size
-    """
+    def __str__(self):
+        if name is not None :
+            return self.name + ' at position ' + str(self.x)
+        else : 
+            return 'Aperture Stop at position ' + str(self.x)
 
-    def __init__(self, name = '', 
-                 diameter = None, 
-                 pos_x = None, 
-                 thickness = None, 
-                 n_refr  = None, 
-                 conductivity = None):
-        
-        self.name = name                #NAME OF IMAGE PLANE
-        self.thick = thickness          #THICKNESS OF IMAGE PLANE
-        self.x = pos_x                  #POSITION ON OPTICAL AXIS
-        self.diameter = diameter        #DIAMETER OF IMAGE PLANE
+class ImagePlane(object):
+    '''
+    Class defining an image plane
+    '''
+
+    def __init__(self,  
+                 diameter, 
+                 pos_x, 
+                 thickness, 
+                 n_refr = 1, 
+                 conductivity = np.inf,
+                 name = ''):
+        '''
+        Defines the attributes of the aperture stop object
+
+        Arguments
+        ---------       
+        diameter : float 
+            Diameter of the image plane slab
+        pos_x : float
+            Position of the image plane along x-axis
+        thickness : float
+            Thickness of image plane slab
+        n_refr : float, optional
+            Index of refraction of the material 
+            if the stop is dielectric
+            (default = 1)
+        conductivity : float, optional
+            Conductivity of the material (default = np.inf)
+        name : str, optional
+            Name of object (default : None)
+        '''
+
+        self.name = name                
+        self.thick = thickness          
+        self.x = pos_x                  
+        self.diameter = diameter        
         
         if conductivity != np.inf :
             #Defines the material with given properties
@@ -789,126 +1015,148 @@ class ImagePlane(object):
             self.material = mp.perfect_electric_conductor
         
         self.object_type = 'ImagePlane'
+
+    def __str__(self):
+        if name is not None :
+            return self.name + ' at position ' + str(self.x)
+        else : 
+            return 'Image Plane at position ' + str(self.x)
         
-    
-    
 class Sim(object):
-    """
-    Runs the sim object from MEEP with the dielectric map created for the system
-    and a source that can be specified as Gaussian (monochromatic or multichromatic)
-    or plane wave.
-    """
+    '''
+    Runs the sim object from MEEP with the dielectric map 
+    created for the system and a source that can be 
+    specified as Gaussian or plane wave.
+    Custom sources not implemented yet.
+    '''
     
     def __init__(self, optical_system):
-        ### Defines the optical system to be used for the simulation
-        self.opt_sys = optical_system
-           
-    
-    def PML(self, dpml):
-        ### Defines the boundary layer of Perfectly Matched Layer as well as the 
-        ### computational cell so that the PML doesn't overlap on the materials.
-        
+        '''
+        Initializes the main simulation properties
+
+        Arguments
+        ---------
+        optical_system : OpticalSystem object
+            Optical system to be used for the simulation
+        '''
+
+        self.OS = optical_system
+
+        # Defines the boundary layer of Perfectly Matched Layer as well as the 
+        # computational cell so that the PML doesn't overlap on the materials.
+        dpml = self.OS.dpml
         self.pml_layers = [mp.PML(thickness = dpml)]
-        self.cell_size_x = self.opt_sys.size_x+2*dpml
-        self.cell_size_y = self.opt_sys.size_y+2*dpml
-        self.cell = mp.Vector3(self.opt_sys.size_x+2*dpml, self.opt_sys.size_y+2*dpml)
-        
-    def define_source(self, frequency = None,
-                      wavelength = None, 
+        self.cell_size_x = self.OS.size_x+2*dpml
+        self.cell_size_y = self.OS.size_y+2*dpml
+        self.cell = mp.Vector3(self.OS.size_x+2*dpml, 
+                               self.OS.size_y+2*dpml)
+
+    def __str__(self):
+        return 'Simulation object of Optical System named' + self.OS.name
+                   
+    def define_source(self, 
+                      f = None,
+                      wvl = None, 
                       sourcetype = 'Plane wave', 
-                      x = 0, y = 0, 
-                      size_x = 0, size_y = 300, 
-                      beam_width = 0, 
-                      focus_pt_x = 0, focus_pt_y = 0,
-                      fwidth = 0,
+                      x = 0, 
+                      y = 0, 
+                      size_x = 0, 
+                      size_y = 0, 
+                      beam_width = 0,
                       rot_angle = 0):
-        """
+        '''
         Defines the source to be used by the simulation. Only does one source
         at a time
 
-        Parameters
-        ----------
-        frequency : FLOAT, optional
-            Frequency of the source
-        wavelength : FLOAT, optional
-            Wavelength of the source 
-        sourcetype : STR, optional
+        Arguments
+        ---------
+        f : float, optional
+            Frequency of the source (default : None)
+        wvl : float, optional
+            Wavelength of the source (default : None)
+        sourcetype : str, optional
             A source can be a plane wave coming on the aperture
-            or a gaussian beam on the image plane. The default is 'Plane wave'.
-        x : FLOAT, optional
-            x-Position of the source center. The default is 0.
-        y : FLOAT, optional
-            y-Position of the source center. The default is 0.
-        size_x : FLOAT, optional
-            x-size of the source. The default is 0.
-        size_y : FLOAT, optional
-            y-size of the source. The default is 300.
-        beam_width : FLOAT, optional
-            For a gaussian beam, defines its width. The default is 0.
-        focus_pt_x : FLOAT, optional
-            For a gaussian beam, defines where is the x position of the focus 
-            of the waist. The default is 0.
-        focus_pt_y : FLOAT, optional
-            For a gaussian beam, defines where is the y position of the focus 
-            of the waist. The default is 0..
-        fwidth : FLOAT, optional
-            If the beam is to be multichromatic, defines the frequency width 
-            around the  center frequency. The default is 0.
-        
+            or a gaussian beam on the image plane. 
+            (default : 'Plane wave')
+        x : float, optional
+            x-Position of the source center. (default : 0.)
+        y : float, optional
+            y-Position of the source center. (default : 0.)
+        size_x : float, optional
+            x-size of the source. (default : 0.)
+        size_y : float, optional
+            y-size of the source. (default : 0.)
+        beam_width : float, optional
+            For a gaussian beam, defines its width. (default : 0.)
+        rot_angle : float, optional
+            Angle by which the plane wave is rotated w.r.t vertical
+
         Returns
         -------
         self.source : MEEP source object
             Object that will be used in the sim function.
 
-        """
+        Notes
+        -----
+        Gaussian beam is located by default on the image plane.
+        '''
         
-        if wavelength is not None :
-           frequency = 1/wavelength
+        if wvl is not None :
+           frequency = 1/wvl
 
         if frequency is not None:
-            wavelength = 1/frequency
-
-        #Its easier for the user to define the system such that x=0 is the 
-        #plane on the left and not the center of the cell, this allows for that :
-        x_meep = x - self.opt_sys.size_x/2
-        y_meep = y
+            wvl = 1/f
         
-        #Defines these objects so that they can be sued outside of the 
-        #function later :
-        self.wavelength = wavelength
-        self.frequency = frequency
-        self.fwidth = fwidth
+        self.wvl = wvl
+        self.f = f
         
-        #Sim is monochromatic by default
-        self.multichromatic = False 
-
+        #Rotation of plane wave
         rot_angle *= np.pi/180
         def amp_func(P):
-            k = mp.Vector3(2*np.pi*np.cos(rot_angle)/self.wavelength,2*np.pi*np.sin(rot_angle)/self.wavelength,0)
-            #k.rotate(axis = mp.Vector(0,0,1), theta = rot_angle)
+            '''
+            Returns amplitude of source with added phase to 
+            emulate source rotation
+
+            Arguments
+            ---------
+            P : mp.Vector3
+                Meep position object at which the source is evaluated.
+
+            Returns
+            -------
+            amp : complex
+                Complex amplitude of source at P.
+            '''
+
+            k = mp.Vector3(2*np.pi*np.cos(rot_angle)/self.wvl,
+                           2*np.pi*np.sin(rot_angle)/self.wvl,
+                           0)
             return np.exp(1j* k.dot(P))
 
         
-        #Different action for different source types
+        #Different sources definitions
         if sourcetype == 'Plane wave':
-            self.source = [mp.Source(mp.ContinuousSource(frequency, is_integrated=True),
+            self.source = [mp.Source(mp.ContinuousSource(f, is_integrated=True),
                            component=mp.Ez,
-                           center=mp.Vector3(x_meep, y_meep, 0),
+                           center=mp.Vector3(x, y, 0),
                            size=mp.Vector3(size_x, size_y, 0),
                            amp_func = amp_func)]
         
+
         elif sourcetype == 'Gaussian beam':
-            self.source = [mp.GaussianBeamSource(mp.ContinuousSource(frequency),
+            self.source = [mp.GaussianBeamSource(mp.ContinuousSource(f),
                       component = mp.Ez,
-                      center = mp.Vector3(self.opt_sys.image_plane_pos, y_meep, 0),
+                      center = mp.Vector3(self.OS.IP_pos, y, 0),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y),
                       beam_kdir = mp.Vector3(-1, 0),
                       beam_w0 = beam_width,
                       beam_E0 = mp.Vector3(0,0,1),
-                      size=mp.Vector3(size_x, self.opt_sys.size_y, 0))]
+                      size=mp.Vector3(size_x, size_y, 0))]
 
             self.beam_waist = beam_width
-            
+        
+        """ 
+        #NOT CURRENTLY USED   
         elif sourcetype == 'Gaussian beam multichromatic':
             #The multichromatic object is later used so that the averaging time
             #is set accordingly
@@ -922,130 +1170,188 @@ class Sim(object):
             #artifacts
             self.source = [mp.GaussianBeamSource(mp.GaussianSource(frequency, fwidth = self.fwidth, cutoff = 5),
                       component = mp.Ez,
-                      center = mp.Vector3(self.opt_sys.image_plane_pos-1, y_meep, 0),
+                      center = mp.Vector3(self.OS.IP_pos-1, y_meep, 0),
                       beam_x0 = mp.Vector3(focus_pt_x, focus_pt_y),
                       beam_kdir = mp.Vector3(-1, 0),
                       beam_w0 = beam_width,
                       beam_E0 = mp.Vector3(0,0,1),
                       size=mp.Vector3(size_x, size_y, 0))]
-        
+        """
         return self.source
     
     
-    def run_sim(self, runtime = 0., dpml = None, sim_resolution = 1, 
-            get_mp4 = False, Nfps = 24, movie_name = 'test.mp4', image_every = 5, filename = 'pouet'):
-        """
+    def run_sim(self, 
+                runtime, 
+                sim_resolution = 1,
+                eps_map_name = 'epsilon_map', 
+                get_mp4 = False, 
+                Nfps = 24, 
+                movie_name = 'movie', 
+                image_every = 5,
+                ff_angle = 45,
+                ff_npts = 500):
+        '''
         Creates the sim environment as defined by MEEP and then runs it.
-        
-        Parameters
+        Also defines the near field region to get the far field beam.
+        Also can save a video of the sim.
+
+        Arguments
         ----------
-        runtime : FLOAT, optional
-            Meep time for which the sim should be run. The default is 0..
-        dpml : FLOAT, optional
-            The PML layer thickness is set by the user when defining the system
-            If not, it defaults then to half the main wavelength.
-        sim_resolution : FLOAT, optional
-            Resolution of the grid created by Meep. Recall that res/freq should 
-            be at least 8 in the highest index material. The default is 1.
+        runtime : float
+            Meep time for which the sim should be run. 
+            Usually equal to system size along x.
+        sim_resolution : float, optional
+            Resolution of the grid created by Meep. 
+            Recall that wavelength*resolution should 
+            be at least 8 in the highest index material. 
+            (default : 1)
+        eps_map_name : str, optional
+            Name of the file containing the permittivity map
+            (default : 'epsilon_map')
+        get_mp4 : bool, optional
+            Whether to make a video of the sim (default : False)
+        Nfps : int, optional 
+            Number of fps at which to save the video. (default : 24)
+        movie_name : str, optional
+            Name of the file of the video. (default : 'movie')
+        ff_angle : float, optional
+            Max angle in degrees at which the 
+            far field is retrieved (default : 45)
+        ff_npts : int, optional
+            Number of far field points (default : 500)
+        '''
 
-        Returns
-        -------
-        None.
+        self.simres = sim_resolution
 
-        """
-        
-        
-        dpml = self.opt_sys.dpml
-        
-        if dpml is None :
-            #Closest integer to half wavelength
-            dpml = np.int(np.around(0.5*1/self.frequency))
-        
-        
-        self.PML(dpml)
-        self.dpml = dpml
-        self.sim_resolution = sim_resolution
-
-
-        ff_distance = 1e8      # far-field distance from near-field monitor
-        ff_angle = 40          # far-field cone angle
-        ff_npts = 500          # number of far-field points
-
-        ff_length = ff_distance*np.tan(np.radians(ff_angle))
-        ff_res = ff_npts/ff_length
+        #Parameters defining the far fied properties
+        self.ff_distance = 1e8      
+        self.ff_angle = ff_angle       
+        self.ff_npts = ff_npts         
+        self.ff_length = ff_distance*np.tan(np.radians(ff_angle))
+        self.ff_res = ff_npts/ff_length
 
         
-
-
         #Defines the simulation environment, using the various objects defined
         #previously
         self.sim = mp.Simulation(cell_size=self.cell,
+                    geometry_center = mp.Vector3(-self.OS.size_x/2,0,0),
                     boundary_layers=self.pml_layers,
-                    geometry=self.opt_sys.geometry, 
+                    geometry=self.OS.geometry, 
                     sources=self.source,
-                    resolution=self.sim_resolution,
+                    resolution=self.simres,
                     epsilon_input_file = 'epsilon_map.h5:eps')
 
+        #Defines the near field region that can then be used to retrieve
+        #the far field beam.
         nfreq = 1
-        fcen = 1/self.wavelength
+        fcen = self.f
         df = 0
-        n2f_pt = mp.Vector3(-self.opt_sys.size_x/2+self.opt_sys.aper_pos_x, 0)
-        n2f_obj = self.sim.add_near2far(fcen, df, nfreq, mp.Near2FarRegion(center=n2f_pt, size = (0,2000*self.sim_resolution)))     
 
+        n2f_pt = mp.Vector3(self.OS.aper_pos_x, 0)
+        n2f_obj = self.sim.add_near2far(fcen, 
+                            df, 
+                            nfreq, 
+                            mp.Near2FarRegion(center=n2f_pt, 
+                                size = (0,self.OS.aper_size*self.simres)))     
 
-        #n2f_obj = self.sim.add_near2far(self.frequency, 0, 1, mp.Near2FarRegion(center=mp.Vector3(-390), size=mp.Vector3(y=200)))
-
-        #Runs the sim
+        #Animate object
         animate = mp.Animate2D(self.sim,
                        fields=mp.Ez,
                        realtime=True,
-                       field_parameters={'alpha':0.8, 'cmap':'RdBu', 'interpolation':'none'},
-                       boundary_parameters={'hatch':'o', 'linewidth':1.5, 'facecolor':'y', 'edgecolor':'b', 'alpha':0.3})
+                       field_parameters={'alpha':0.8, 
+                                        'cmap':'RdBu', 
+                                        'interpolation':'none'},
+                       boundary_parameters={'hatch':'o', 
+                                        'linewidth':1.5, 
+                                        'facecolor':'y', 
+                                        'edgecolor':'b', 
+                                        'alpha':0.3})
 
+        #Runs sim
         if get_mp4 :
             self.sim.run(mp.at_every(image_every, animate), until = runtime)
-            animate.to_mp4(Nfps, movie_name)
+            animate.to_mp4(Nfps, movie_name + '.mp4')
 
         if not get_mp4 :
             self.sim.run(until = runtime)
         
-        ff_source = self.sim.get_farfields(n2f_obj, ff_res, center=mp.Vector3(ff_distance,0.5*ff_length), size=mp.Vector3(y=ff_length))
+    def get_MEEP_ff(self, 
+                    saveplot = False,
+                    parallel = False,
+                    saveh5 = False,
+                    filename = None,
+                    ylim = -60):
+        '''
+        Gets the far field using MEEP near2far function.
+
+        Arguments
+        ---------
+        saveplot : bool, optional
+            Whether to save the plot (default : False)
+        parallel : bool, optional
+            Whether the code is running in parallel MPI (default : False)
+        saveh5 : bool, optional
+            Whether to save the far field beam amplitude (default : False)
+        filename : str, optional
+            Name of the files saved (default : None)
+        ylim : float, optional
+            Limit of plot in negative dB (default : -60)
+        '''
+
+        ff_source = self.sim.get_farfields(n2f_obj, 
+            self.ff_res, 
+            center=mp.Vector3(self.ff_distance,0.5*self.ff_length), 
+            size=mp.Vector3(y=self.ff_length))
+
         ff_lengths = np.linspace(0,ff_length,ff_npts)
         angles = [np.degrees(np.arctan(f)) for f in ff_lengths/ff_distance]
 
-
-        #idx_slice = np.where(np.asarray(freqs) == 1/wvl_slice)[0][0]
         norm = np.absolute(ff_source['Ez'])/np.max(np.absolute(ff_source['Ez']))
         ff_dB = 10*np.log10(norm)
 
-        plt.figure(figsize = (8,6))
-        plt.plot(angles,ff_dB[:],'bo-')
-        plt.xlim(0,ff_angle)
-        plt.ylim((-60,0))
-        plt.xticks([t for t in range(0,ff_angle+1,10)])
-        plt.xlabel("angle (degrees)")
-        plt.ylabel("amplitude")
-        plt.grid(axis='x',linewidth=0.5,linestyle='--')
-        plt.title("f.-f. spectra @  λ = 10 mm")
-        plt.savefig(filename + '.png')
-        plt.close()
+        if saveplot : 
+            plt.figure(figsize = (8,6))
+            plt.plot(angles,ff_dB[:],'bo-')
+            plt.xlim(0,ff_angle)
+            plt.ylim((ylim,0))
+            plt.xticks([t for t in range(0,ff_angle+1,10)])
+            plt.xlabel("angle (degrees)")
+            plt.ylabel("amplitude")
+            plt.grid(axis='x',linewidth=0.5,linestyle='--')
+            plt.title("f.-f. spectra @  λ = 10 mm")
+            plt.savefig(filename + '.png')
+            plt.close()
 
-        h = h5py.File(filename + '.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
-        h.create_dataset('deg', data=angles)
-        h.create_dataset('amplitudedB', data=ff_dB, dtype = 'float64')
-        h.close()
+        if saveh5 :
+            if parallel : 
+                h = h5py.File(filename + '.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
+            else : 
+                h = h5py.File(filename + '.h5', 'w')
+            h.create_dataset('deg', data=angles)
+            h.create_dataset('amplitudedB', data=ff_dB, dtype = 'float64')
+            h.close()
         
     def plot_system(self):
         
-        #Makes a plot of the various objects in the computational cell, with 
-        #the objects in grey and the PML in purple.
+        '''
+        Plots the various objects in the computational cell, with 
+        the objects in grey and the PML in purple.
+
+        Notes
+        -----
+        Doesn't work ideally when some objects are perfect 
+        conductors, as the permittivity goes to infinity, the objects
+        with finite permittivity are not shown.
+        '''
         
-        eps_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Dielectric)
+        eps_data = self.sim.get_array(center=mp.Vector3(), 
+                                      size=self.cell, 
+                                      component=mp.Dielectric)
         pml = np.zeros((eps_data.transpose().shape))
-        pml[0: self.dpml*self.sim_resolution, :] = 1
-        pml[:, 0: self.dpml*self.sim_resolution] = 1
-        pml[:, -self.dpml*self.sim_resolution : ] = 1
-        pml[-self.dpml*self.sim_resolution : , :] = 1
+        pml[0: self.dpml*self.simres, :] = 1
+        pml[:, 0: self.dpml*self.simres] = 1
+        pml[:, -self.dpml*self.simres : ] = 1
+        pml[-self.dpml*self.simres : , :] = 1
         plt.figure()
         plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='Greys')
         plt.imshow(pml, cmap = 'Purples', alpha = 0.4)
@@ -1057,7 +1363,16 @@ class Sim(object):
     
     def plot_efield(self, name = 'efield', comp = 'Ez') :
 
-        #Makes a plot of the Ez component of the electric field in the system
+        '''
+        Plots the electric field in the system.
+
+        Arguments
+        ---------
+        name : str, optional
+            Name of plot to be saved
+        comp : str, optional
+            Component of field to plot. 'Ez' or 'Ey'. (default : 'Ez') 
+        '''
         
         eps_data = self.sim.get_array(center=mp.Vector3(), size=self.cell, component=mp.Dielectric)
         if comp == 'Ez' :
@@ -1069,7 +1384,7 @@ class Sim(object):
         plt.figure(figsize = (20,20))
         plt.imshow(eps_data.transpose(), interpolation='spline36', cmap='binary', extent = extent)
         plt.imshow(e_data.transpose(), interpolation='spline36', cmap='RdBu', alpha = 0.9, extent = extent)
-        x = np.ones(20)*self.opt_sys.image_plane_pos + self.cell_size_x/2
+        x = np.ones(20)*self.OS.IP_pos + self.cell_size_x/2
         y = np.linspace(-self.beam_waist, self.beam_waist, 20) + self.cell_size_y/2
         plt.plot(x, y, c = 'green', linewidth = 3)
         plt.xlabel('x')
@@ -1078,6 +1393,8 @@ class Sim(object):
         plt.show()
         plt.close()
 
+    """
+    NOT USED, CAN BE USEFUL
     def plot_airy_spot(self):
 
         #Makes a plot of the evolution of the instantaneous Ez squared over the 
@@ -1088,54 +1405,59 @@ class Sim(object):
         for k in range(np.int(5/self.frequency*0.5)):
             self.sim.run(until = 1)
             #Gets the e-field just 1 unit before the image plane
-            ez_data = self.sim.get_array(center=mp.Vector3(self.opt_sys.image_plane_pos-1, 0), 
-                                         size=mp.Vector3(0, self.opt_sys.size_y), component=mp.Ez)
-            plt.scatter(np.arange(len(ez_data)/self.sim_resolution), ez_data**2, marker = '+')
+            ez_data = self.sim.get_array(center=mp.Vector3(self.OS.IP_pos-1, 0), 
+                                         size=mp.Vector3(0, self.OS.size_y), component=mp.Ez)
+            plt.scatter(np.arange(len(ez_data)/self.simres), ez_data**2, marker = '+')
         plt.title('$E^2$ at image plane')
         plt.xlabel('y (mm)')
         plt.ylabel('$E^2$')
         plt.show()
-    
-    def plot_beam(self, plot_amp = False, filename = 'test',
-                  aper_pos_x = 10, aperture_size = 200):
-        """
-        Plots the Ez component of the electric field at the aperture. Is used when
-        the source is a gaussian beam at the image plane.
+    """
 
-        Parameters
-        ----------
-        single_plot : BOOLEAN, optional
-            Default to True, so that it gives a single plot. If single_plot is 
-            False, you can call the function several times so that the plots are
-            on the same figure
-        colors : LIST OF STR, optional
-            When using this function for mutliple plots, the color can be chosen
-            for plot clarity.
-        plot_n : INT, optional
-            When plotting for mutliple beams, allows to pick the right color
-            within the list. The default is 0.
-        linestyle : STR, optional
-            When using this function for multiple plots, the linestyle can be chosen
-            for plot clarity
-        aper_pos_x : FLOAT, optional
-            Position of aperture, at which the electric field is computed.
+    def get_complex_field(self, 
+                        plot_amp = False, 
+                        saveh5 = False, 
+                        filename = 'test',
+                        parallel = False):
+        '''
+        Gets the electric field in its complex form at the aperture.
+        To that end, fits the time evolution of the field there.
+
+        Arguments
+        ---------
+        plot_amp : bool, optional
+            Whether to plot the amplitude of field at aperture. 
+            (default : False)
+        saveh5 : bool, optional
+            Whether to save the amplitude in an h5 file. (default : False)
+        filename : bool, optional
+            Name of the plot to be saved
+        parallel : bool, optional
+            Whether the code is running in parallel
+
         Returns
         -------
-        amplitude*phase : complex ARRAY
+        amplitude*phase : complex array
             Complex electric field at the aperture
 
-        """       
-        #Setting the timestep to a very low value, so that MEEP uses its lowest timestep
+        '''
+
+        #Setting the timestep to a very low value, 
+        #so that MEEP uses its lowest timestep
         timestep = .3
 
-        #50 steps Is roughly enough to give a few periods for wavelengths from 1 to 10
+        #120 steps Is roughly enough to give a 
+        #few periods for wavelengths from 1 to 10
+        #Can be tweaked to save on sim time.
         n_iter = 120
         
         #Get the real field at aperture
-        efield = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0), 
-                                         size=mp.Vector3(0, aperture_size), component=mp.Ez)
+        efield = self.sim.get_array(center=mp.Vector3(aper_pos_x, 0), 
+                                    size=mp.Vector3(0, AP_size), 
+                                    component=mp.Ez)
 
-        res = self.sim_resolution
+        res = self.simres
+        AP_size = self.OS.aper_size
 
         #Initializes the list containing the E field evolution
         e_field_evol = np.ones((n_iter, len(efield)))
@@ -1149,48 +1471,48 @@ class Sim(object):
         for k in range(n_iter):
             self.sim.run(until = timestep)
             time[k] = self.sim.meep_time()
-            e_field_evol[k] = self.sim.get_array(center=mp.Vector3(-self.opt_sys.size_x/2+aper_pos_x, 0), 
-                                         size=mp.Vector3(0, aperture_size), component=mp.Ez)
+            e_field_evol[k] = self.sim.get_array(center=mp.Vector3(aper_pos_x, 0), 
+                                         size=mp.Vector3(0, AP_size), 
+                                         component=mp.Ez)
         
         #Each point on the aperture is fit for a cosine with amplitude and phase
         def f(x, amp, phase):
-            return amp*np.cos(x*2*np.pi/self.wavelength + phase)
+            return amp*np.cos(x*2*np.pi/self.wvl + phase)
 
         #Initialize the lists of amplitude and phase over the aperture
-        amplitude = np.zeros(aperture_size*res)
-        phase = np.zeros(aperture_size*res)
-        #err = np.zeros(aperture_size*res)
+        amplitude = np.zeros(AP_size*res)
+        phase = np.zeros(AP_size*res)
 
         #The field is only taken on the opening of the aperture
-        idx = 0 #np.int((self.opt_sys.size_y - aperture_size)/2)
 
         #Fits amplitude and phase for each point
-        for k in range(aperture_size*res):
-            popt, pcov = sc.curve_fit(f, time, e_field_evol[:, idx*res+k])
+        for k in range(AP_size*res):
+            popt, pcov = sc.curve_fit(f, time, e_field_evol[:,k])
             amplitude[k] = popt[0]
             phase[k] = popt[1]
-
-            #err[k] = np.mean((e_field_evol[:, k] - f(time, popt[0], popt[1]))/e_field_evol[:, k])
-
-        ### Plot
         
-    
+        ### Plot
         if plot_amp :
-            #Displays the plot if single_plot is True
             norm = np.max(np.abs(amplitude**2))
             amp = 10*np.log10(np.abs(amplitude**2)/norm)
-            y = np.linspace(-aperture_size/2,aperture_size/2,len(amplitude))
+            y = np.linspace(-AP_size/2,AP_size/2,len(amplitude))
             plt.figure()
             plt.plot(y, amp) 
             plt.ylim((-60,0))
-            plt.xlim((0, aperture_size/2))
+            plt.xlim((0, AP_size/2))
             plt.title('E field amplitude on aperture')
             plt.xlabel('y (mm)')
             plt.ylabel('$Amplitude [dB]$')
             plt.savefig(filename + '.png')
             plt.close()
 
-            h = h5py.File(filename + '.h5', 'w', driver ='mpio', comm=MPI.COMM_WORLD)
+        if saveh5 : 
+            if parallel :
+                h = h5py.File(filename + '.h5', 'w', 
+                            driver ='mpio', 
+                            comm=MPI.COMM_WORLD)
+            else: 
+                h = h5py.File(filename + '.h5', 'w')
             h.create_dataset('y', data=y)
             h.create_dataset('amplitude', data=amplitude, dtype = 'float64')
             h.create_dataset('phase', data=phase, dtype = 'float64')
@@ -1199,77 +1521,61 @@ class Sim(object):
         return amplitude*np.exp(1j*phase)
     
 class Analysis(object):
-    """
-    When analyzing an optical system such as a telescope, we want to see the impact
-    of changes on the far field beam. To that end, gaussian beams are sent from
-    the image plane at different locations to recover different E fields squared
-    at the aperture, of which the Fourier Transform can be taken. 
-    """
+    '''
+    Class definining analysis tools.
+    '''
     
     def __init__(self, sim):
-        """
-        Runs on a specific sim environment : the objects and their properties as 
+        '''
+        Defines the used sim environment : the objects and their properties as 
         specified in the sim will be the same all throughout the analysis.
-        """
+
+        Arguments
+        ---------
+        sim : sim object
+            Sim to be used
+        '''
         self.sim = sim
         
-    def image_plane_beams(self, frequency = None, wavelength = None, 
-                        fwidth = 0,
-                        sourcetype = 'Gaussian beam', 
-                        y_max = 0., Nb_sources = 1, sim_resolution = 1,
-                        linestyle = '-', runtime = 800, aperture_size = 200,
-                        beam_w0 = 10, plot_amp = False, plotname = 'test'):
-        """
-        Sends gaussian beams (mono or multichromatic) from the image plane and 
-        recovers the E-field squared at the aperture. Also plots the electric 
-        fields at the aperture.
+    def image_plane_beams(self, 
+                        f = None, 
+                        wvl = None, 
+                        y_source = 0., 
+                        simres = 1,
+                        runtime = 750, 
+                        beam_w0 = 10, 
+                        plot_amp = False, 
+                        plotname = 'test'):
+        '''
+        Sends gaussian beams from the image plane and recovers 
+        the amplitudes at the aperture. 
 
-        Parameters
-        ----------
-        frequency : FLOAT, optional
-            Frequency of the source
-        wavelength : FLOAT, optional
-            Wavelength of the source 
-        fwidth : FLOAT, optional
-            If the beams are to be multichromatic, defines the frequency width 
-            around the  center frequency. The default is 0.
-        y_max : FLOAT, optional
-            If the number of sources is more than one, the beams sent from the 
-            image plane are equally spaced between y=0 on the optical axis and y_max.
-        Nb_souyrces : FLOAT, optional
-            Number of sources for the analysis. Ideally, 2 so that one is on the optical
-            axis and the other on the edge of the image plane, to get a maximum of 
-            information without running too many sims.
-        sim_resolution : INT, optional
-            Is set so that wavelength*resolution should be >8 in the highest 
-            index materials
-        sourcetype : STR, optional
-            Either 'Gaussian beam' or 'Gaussian beam multichromatic.
-        linestyle : STR, optional
-            When running two analysis to compare some effect, linestyle can 
-            be changed between the two so that comparison on the plot is
-            easier
-        runtime : FLOAT, optional
-            This is the time for which the sim should run before aveaging the field 
-            over the duration of the gaussian pulse. Ideally it is set so that
-            the gaussian pulse arrives just before the aperture stop.
-        Returns
-        -------
-        None, but registers self.list_beams in which the averaged electric fields
-        are stored. self.list_beams[k] stores the averaged electric field for the
-        k-th beam.
-
-        """
+        Arguments
+        ---------
+        f : float, optional
+            Frequency of the source (default : None)
+        wvl : float, optional
+            Wavelength of the source (default : None)
+        y_source : float, optional
+            Position of source on image plane along y axis. (default : 0)
+        simres : float, optional
+            Resolution of simulation (default : 1)
+        runtime : float, optional
+            Runtime of simulation. Should roughly be 
+            system size along optical axis. (default : 750)
+        beam_w0 : float, optional
+            Size of beam waist of gaussian source (default : 10)
+        
+        '''
 
         # Adaptation to specify either in wavelength or frequency :
-        if wavelength is not None :
-           frequency = 1/wavelength
+        if wvl is not None :
+           f = 1/wvl
 
-        if frequency is not None:
-            wavelength = 1/frequency
+        if f is not None:
+            wvl = 1/f
 
-        self.wavelength = wavelength
-        self.aperture_size = aperture_size
+        self.wvl = wvl
 
         #For the plot of the electric fields, the cmap is created for the colors
         #to represent the distance from the optical axis
@@ -1290,23 +1596,23 @@ class Analysis(object):
                 height = 0
 
             #Defines the source at the appropriate height on the image plane
-            self.sim.define_source(frequency, 
+            self.sim.define_source(f, 
                                    sourcetype = sourcetype,
                                    x=self.sim.opt_sys.image_plane_pos, y = height, 
                                    size_x = 0, size_y = self.sim.opt_sys.size_y, 
                                    beam_width = beam_w0)
             
             #Runs the sim
-            self.sim.run_sim(runtime = runtime, sim_resolution = sim_resolution, filename = plotname)
+            self.sim.run_sim(runtime = runtime, simres = simres, filename = plotname)
 
             #Gets the complex electric field and adds it to the plot
-            E_field = self.sim.plot_beam(plot_amp = plot_amp,
+            E_field = self.sim.get_complex_field(plot_amp = plot_amp,
                 filename = plotname,
                 aperture_size = aperture_size, aper_pos_x = self.sim.opt_sys.aper_pos_x)
 
             #Get the FWHM for the field at aperture
             middle_idx = np.int(len(E_field)/2)
-            c = max(E_field[middle_idx-5*sim_resolution: middle_idx+5*sim_resolution].real) 
+            c = max(E_field[middle_idx-5*simres: middle_idx+5*simres].real) 
 
             j = middle_idx
             while E_field[j].real>c/2 : 
@@ -1314,7 +1620,7 @@ class Analysis(object):
                 if j == len(E_field):
                     j = middle_idx
                     break
-            FWHM_ap = (j-middle_idx)*2/sim_resolution
+            FWHM_ap = (j-middle_idx)*2/simres
  
             #FWHM is zero if the field has a max not in the middle
             if np.max(E_field.real)>c :
@@ -1347,7 +1653,7 @@ class Analysis(object):
         #Initialize the list
         FFTs = [[] for k in range(len(self.list_efields))]
 
-        res = self.sim.sim_resolution
+        res = self.sim.simres
 
         self.FWHM_fft = [0 for k in range(len(self.list_efields))]
 
@@ -1361,7 +1667,7 @@ class Analysis(object):
             fft = np.fft.fft(self.list_efields[k], n = precision_factor*len(self.list_efields[k]))
 
             #Corrective factor for distance to the aperture
-            beam = fft*(1+(freq*self.wavelength)**2)
+            beam = fft*(1+(freq*self.wvl)**2)
 
             #FFT is normalized by its max
             FFTs[k] = np.abs(beam) #beam.real
@@ -1374,7 +1680,7 @@ class Analysis(object):
 
             freq_interp = np.interp(0.5, 
                                         (np.abs(FFTs[k][j].real), np.abs(FFTs[k][j-1].real)), 
-                                        (np.arctan(freq[j]*self.wavelength),np.arctan(freq[j-1]*self.wavelength)))
+                                        (np.arctan(freq[j]*self.wvl),np.arctan(freq[j-1]*self.wvl)))
             self.FWHM_fft[k] = freq_interp*2*180/np.pi
         return freq, FFTs
 
