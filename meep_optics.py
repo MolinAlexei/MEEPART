@@ -10,7 +10,7 @@ import os
 import glob
 import csv
 
-mp.verbosity(0)
+mp.verbosity(1)
 
 class OpticalSystem(object):
     '''
@@ -1257,7 +1257,7 @@ class Sim(object):
         #Parameters defining the far fied properties
         self.ff_distance = 1e8      
         self.ff_angle = ff_angle       
-        self.ff_npts = ff_npts +1         
+        self.ff_npts = ff_npts        
         
 
         
@@ -1282,7 +1282,7 @@ class Sim(object):
                             df, 
                             nfreq, 
                             mp.Near2FarRegion(center=n2f_pt, 
-                                size = (0,self.OS.aper_size*self.simres)))     
+                                size = (0,self.OS.aper_size), weight = -1))     
 
         #Animate object
         animate = mp.Animate2D(self.sim,
@@ -1330,16 +1330,16 @@ class Sim(object):
         ff_length = self.ff_distance*np.tan(np.radians(self.ff_angle))
         ff_res = self.ff_npts/ff_length
 
-        ff_source = self.sim.get_farfields(self.n2f_obj, 
+        ff = self.sim.get_farfields(self.n2f_obj, 
             ff_res, 
-            center=mp.Vector3(self.ff_distance,0.5*ff_length), 
+            center=mp.Vector3(- self.ff_distance,0.5*ff_length), 
             size=mp.Vector3(y=ff_length))
 
         ff_lengths = np.linspace(0,ff_length,self.ff_npts)
         angles = [np.degrees(np.arctan(f)) for f in ff_lengths/self.ff_distance]
 
-        norm = np.absolute(ff_source['Ez'])/np.max(np.absolute(ff_source['Ez']))
-        ff_dB = 10*np.log10(norm) #/ np.cos(np.radians(angles))**2
+        norm = np.absolute(ff['Ez'])/np.max(np.absolute(ff['Ez'])) / (np.cos(np.radians(angles)))**2
+        ff_dB = 10*np.log10(norm)  
 
         self.ffmeep = ff_dB
         self.angles = angles
@@ -1434,7 +1434,7 @@ class Sim(object):
                                 'facecolor':'y', 
                                 'edgecolor':'b', 
                                 'alpha':0.3},
-            plot_monitors_flag = False)
+            plot_monitors_flag = True)
         plt.xticks([-self.OS.size_x/2, self.OS.size_x/2], 
             ['0', str(self.OS.size_x)])
         plt.savefig(name + '.png')
@@ -1632,7 +1632,7 @@ class Analysis(object):
         the property i of each list.
         '''
 
-        if wvl is not list :
+        if not isinstance(wvl, list) :
             wvl = [wvl]
             y_source = [y_source]
             beam_w0 = [beam_w0]
@@ -1640,7 +1640,7 @@ class Analysis(object):
 
         # Adaptation to specify either in wavelength or frequency :
         if wvl is not None :
-           f = [1/x for x in wvl]
+           f = [1/wvl[k] for k in range(len(wvl))]
 
         if f is not None:
             wvl = [1/x for x in f]
@@ -1665,16 +1665,15 @@ class Analysis(object):
 
             
             #Runs the sim
-            self.sim.run_sim(runtime, 
-                             simres = 1, ff_angle = 80, ff_npts = 1501)
+            self.sim.run_sim(runtime, simres = simres, ff_angle = 80, ff_npts = 800)
 
             self.sim.plot_efield()
 
-            self.sim.get_MEEP_ff(saveplot = True,
-                    parallel = False,
-                    saveh5 = False,
-                    filename = 'testFF',
-                    ylim = -40)
+            #self.sim.get_MEEP_ff(saveplot = True,
+            #        parallel = False,
+            #        saveh5 = False,
+            #        filename = 'testFF',
+            #        ylim = -40)
 
             #Gets the complex electric field and adds it to the plot
             E_field = self.sim.get_complex_field(plot_amp = plot_amp,
@@ -1777,28 +1776,31 @@ class Analysis(object):
         
         for k in range(len(FFTs)):
 
-            fft_k = FFTs[k] / np.cos(rads)**2
-            fft_dB = 10*np.log10(np.abs(fft_k))
+            fft_k = FFTs[k] / (np.cos(rads)**2)
+            fft_dB = 10*np.log10(fft_k / np.max(fft_k))
+            middle = int(len(fft_k)/2)
 
             #BEAM SOLID ANGLE CALCULATION
             if print_solid_angle :
                 
-                middle = int(len(fft_k)/2)
-                rads = np.append(rads, 0)
+                
+                x_span = np.append(rads, 0)
                 integrand = np.append(fft_k, fft_k[0])
-                right_part = np.trapz(integrand[:middle], x = rads[:middle])
-                left_part = np.trapz(integrand[middle:], x = rads[middle:])
+                right_part = np.trapz(integrand[:middle], x = x_span[:middle])
+                left_part = np.trapz(integrand[middle:], x = x_span[middle:])
                 solid_angle = right_part + left_part
-                print('Beam n.{} solid angle : {:.3e} srads'.format(k, solid_angle*2*np.pi))
+                print('Beam n.{} solid angle : {:.3e} srads'.format(k, 
+                    solid_angle*2*np.pi))
             
             if legend is not None : 
-                plt.plot(deg, fft_dB, label = '{}'.format(legend[k]))
+                plt.plot(deg[:middle], fft_dB[:middle], 
+                    label = '{}'.format(legend[k]))
 
             if legend is None :
-                plt.plot(deg, fft_dB)
+                plt.plot(deg[:middle], fft_dB[:middle])
 
                 #TESTING, ignore this
-                plt.plot(self.sim.angles, self.sim.ffmeep)
+                #plt.plot(self.sim.angles, self.sim.ffmeep)
 
             #BEST FIT GAUSSIAN FWHM
             if print_fwhm :
@@ -1818,7 +1820,7 @@ class Analysis(object):
         if symmetric_beam :
             plt.xlim((0,deg_range))
         if not symmetric_beam : 
-            plt.xlim((-deg_range, deg_range), linestyle = '--')
+            plt.xlim((-deg_range, deg_range))
 
         if legend is not None :
             plt.legend(loc = 'upper right', fontsize = 12)
@@ -1845,6 +1847,8 @@ class Analysis(object):
 
 
 if __name__ == '__main__':
+
+    #Testing code here
     
     lens1 = AsphericLens(name = 'Lens 1', 
                          r1 = 327.365, 
@@ -1883,37 +1887,32 @@ if __name__ == '__main__':
 
 
     opt_sys = OpticalSystem('OptSysTest')
-    opt_sys.set_size(750,300)
-    print(opt_sys)
+    opt_sys.set_size(750,340)
 
-    opt_sys.sys_info(1e-3, meep_freq = 0.3333333)
+    #print(opt_sys)
+    #opt_sys.sys_info(1e-3, meep_freq = 0.3333333)
+    #print(lens1)
+    #print(lens2)
+    #print(image_plane)
+    #print(aperture_stop)
 
-    print(lens1)
-    print(lens2)
-    print(image_plane)
-    print(aperture_stop)
-
-    res = 7
+    res = 5
     wavelength = 10
     dpml = 5
 
-    tube = TelescopeTube(name = 'Tube', thick =10, center = 165)
-    absorber = Absorber(name = 'Absorber', thick = 10, 
-        center = 155, 
-        epsilon_real = 2.1, 
-        epsilon_imag = 0.01, 
-        freq = 1/wavelength)
+    tube = TelescopeTube(name = 'Tube', thick = 10, center = 165)
+    absorber = Absorber(name = 'Absorber', thick = 10, center = 155)
 
-    print(tube)
-    print(absorber)
+    #print(tube)
+    #print(absorber)
     
     
     opt_sys.add_component(lens1)
     opt_sys.add_component(lens2)
     opt_sys.add_component(aperture_stop)
     opt_sys.add_component(image_plane)
-    #opt_sys.add_component(tube)
-    #opt_sys.add_component(absorber)    
+    opt_sys.add_component(tube)
+    opt_sys.add_component(absorber)    
     
 
     opt_sys.assemble_system(dpml = dpml, res = res)
@@ -1949,14 +1948,11 @@ if __name__ == '__main__':
     
     analyse = Analysis(sim)
 
-    analyse.image_plane_beams(wvl = wavelength, 
-                        y_source = 0., 
+    analyse.image_plane_beams(wvl = 3., 
+                        y_source = 100., 
                         simres = res,
                         runtime = 800, 
-                        beam_w0 = 30,
-                        plot_amp = True, 
-                        saveh5 = False, 
-                        filename = 'test_field_ap',
+                        beam_w0 = 3.,
                         parallel = False)
 
     fftfreq, fft = analyse.beam_FT()
@@ -1968,7 +1964,7 @@ if __name__ == '__main__':
                 print_solid_angle = True,
                 print_fwhm = True,
                 savefig = True,
-                path_name = 'test_ff_meepart')
+                path_name = 'withabs')
     
     
 
