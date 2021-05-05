@@ -389,7 +389,7 @@ class OpticalSystem(object):
         This function alters the permittivity map. 
         '''
 
-        res = self.resolution
+        res = self.res
 
         #Function which, given a radius, that 
         #returns the indices of the points within 
@@ -1083,7 +1083,7 @@ class Sim(object):
 
         if beam_waist is None :
             w0 = np.sqrt(- wvl**2 * (taper - a)/b)
-            print('The beam waist is {:.2e} MEEP units')
+            print('The beam waist is {:.2e} MEEP units'.format(w0))
 
         if taper is None :
             A = a - b* beam_waist**2 / wvl**2
@@ -1434,7 +1434,7 @@ class Sim(object):
                                 'facecolor':'y', 
                                 'edgecolor':'b', 
                                 'alpha':0.3},
-            plot_monitors_flag = True)
+            plot_monitors_flag = False)
         plt.xticks([-self.OS.size_x/2, self.OS.size_x/2], 
             ['0', str(self.OS.size_x)])
         plt.savefig(name + '.png')
@@ -1667,7 +1667,7 @@ class Analysis(object):
             #Runs the sim
             self.sim.run_sim(runtime, simres = simres, ff_angle = 80, ff_npts = 800)
 
-            self.sim.plot_efield()
+            #self.sim.plot_efield()
 
             #self.sim.get_MEEP_ff(saveplot = True,
             #        parallel = False,
