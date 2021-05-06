@@ -10,7 +10,6 @@ import os
 import glob
 import csv
 
-mp.verbosity(1)
 
 class OpticalSystem(object):
     '''
@@ -73,10 +72,10 @@ class OpticalSystem(object):
         '''
         Returns the list of components by their names.
         '''
-        out_str = ''
+        print('---Components---')
         for component in self.components:
-            out_str += ' {}'.format(component.name)
-        return out_str
+            print(component.name)
+        print('----------------')
     
     def write_lens(self, comp, eps_map, res):
         '''
@@ -1088,6 +1087,21 @@ class Sim(object):
         if taper is None :
             A = a - b* beam_waist**2 / wvl**2
             print('The taper at angle {:.1f} deg is {:.2f} dB'.format(taper_angle, A))
+
+    def set_verbosity(self, verbosity = 0):
+        '''
+        Sets MEEP's verbosity
+        
+        Arguments
+        ---------
+        verbosity : int
+            Value to give to the verbosity
+            0 is no prints
+            1 is standard prints (enough for debugging)
+            2 is all prints
+        '''
+
+        mp.verbosity(verbosity)
                    
     def define_source(self, 
                       f = None,
@@ -1284,8 +1298,11 @@ class Sim(object):
                             mp.Near2FarRegion(center=n2f_pt, 
                                 size = (0,self.OS.aper_size), weight = -1))     
 
-        #Animate object
-        animate = mp.Animate2D(self.sim,
+        
+        #Runs sim
+        if get_mp4 :
+            #Animate object
+            animate = mp.Animate2D(self.sim,
                        fields=mp.Ez,
                        realtime=True,
                        field_parameters={'alpha':0.8, 
@@ -1297,8 +1314,6 @@ class Sim(object):
                                         'edgecolor':'b', 
                                         'alpha':0.3})
 
-        #Runs sim
-        if get_mp4 :
             self.sim.run(mp.at_every(image_every, animate), until = runtime)
             animate.to_mp4(Nfps, movie_name + '.mp4')
 
@@ -1435,8 +1450,9 @@ class Sim(object):
                                 'edgecolor':'b', 
                                 'alpha':0.3},
             plot_monitors_flag = False)
-        plt.xticks([-self.OS.size_x/2, self.OS.size_x/2], 
-            ['0', str(self.OS.size_x)])
+
+        x_pos = [k - self.OS.size_x/2 for k in range(0, int(self.OS.size_x), 50)]
+        plt.xticks(x_pos, [str(k) for k in range(0, int(self.OS.size_x), 50)] )
         plt.savefig(name + '.png')
 
     """
