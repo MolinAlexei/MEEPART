@@ -1556,11 +1556,12 @@ class Sim(object):
             amplitude[k] = popt[0]
             phase[k] = popt[1]
         
+
+        y = np.linspace(-AP_size/2,AP_size/2,len(amplitude))
         ### Plot
         if plot_amp :
             norm = np.max(np.abs(amplitude))
             amp = 10*np.log10(np.abs(amplitude)/norm)
-            y = np.linspace(-AP_size/2,AP_size/2,len(amplitude))
             plt.figure()
             plt.plot(y, amp) 
             plt.ylim((-60,0))
@@ -1685,11 +1686,11 @@ class Analysis(object):
 
             #self.sim.plot_efield()
 
-            #self.sim.get_MEEP_ff(saveplot = True,
-            #        parallel = False,
-            #        saveh5 = False,
-            #        filename = 'testFF',
-            #        ylim = -40)
+            self.sim.get_MEEP_ff(saveplot = False,
+                    parallel = parallel,
+                    saveh5 = True,
+                    filename = filename[k] + '_n2far',
+                    ylim = -40)
 
             #Gets the complex electric field and adds it to the plot
             E_field = self.sim.get_complex_field(plot_amp = plot_amp,
@@ -1829,7 +1830,7 @@ class Analysis(object):
 
         plt.ylim((ylim, 0))
         plt.xlabel('Angle [deg]', fontsize = 14)
-        plt.ylabel('Power [dB]', fontsize = 14)
+        plt.ylabel('Amplitude [dB]', fontsize = 14)
         plt.xticks(fontsize = 12)
         plt.yticks(fontsize = 12)
 
