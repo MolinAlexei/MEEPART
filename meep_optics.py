@@ -152,39 +152,44 @@ class OpticalSystem(object):
                 comp.delamination(-y_res/res, y0_right)))
             
             #Gradient in the index
+            #ONLY WORKS WHEN NO SURFACE DEFECT
             radial_slope = comp.radial_slope/res
             axial_slope = comp.axial_slope/res
-            eps0 = comp.eps
-            x0 = np.int(np.around(comp.x*res))
-            x_range = range(x_left, x_right+1) 
-            #The value is squared as the permittivity is index squared
-            eps_line = [eps0 + 
+            if radial_slope != 0 or axial_slope != 0 : 
+            
+                eps0 = comp.eps
+                x0 = np.int(np.around(comp.x*res))
+                x_range = range(x_left, x_right+1) 
+                #The value is squared as the permittivity is index squared
+                eps_line = [eps0 + 
                             (y_res*radial_slope)**2 + 
                             ((k-x0)*axial_slope)**2 for k in x_range]
+            if radial_slope ==0 and axial_slope == 0 :
+                eps_line = comp.eps
 
 
             #Surface error
             err_bin_idx = int(np.around(y_res/res/comp.surf_err_width))
             err_left_pos = int(err_left[err_bin_idx])
-            err_left_neg = int(err_left[- np.around(err_bin_idx)])
+            err_left_neg = int(err_left[- err_bin_idx])
 
             err_right_pos = int(err_left[err_bin_idx]) 
             err_right_neg = int(err_left[- err_bin_idx])
 
-            x_left_neg = x_left + err_left_neg
-            x_left_pos = x_left + err_left_pos
+            x_left_neg = int(x_left + err_left_neg)
+            x_left_pos = int(x_left + err_left_pos)
 
-            x_right_neg = x_right + err_right_neg
-            x_right_pos = x_right + err_right_pos
+            x_right_neg = int(x_right + err_right_neg)
+            x_right_pos = int(x_right + err_right_pos)
 
 
             #Write lens between left and right surface below optical axis
-            eps_map[x_left_neg : x_right_neg+1, y_negative] *= eps_line
+            eps_map[x_left_neg: x_right_neg+1, y_negative] *= eps_line
             
             #So that the center line is not affected twice :
             if y_res != 0 :
                 #Write lens between left and right surface above optical axis
-                eps_map[x_left_pos : x_right_pos+1, y_positive] *= eps_line
+                eps_map[x_left_pos: x_right_pos+1, y_positive] *= eps_line
             
             #Write AR coating on left surface
             if comp.AR_left is not None :
@@ -235,6 +240,8 @@ class OpticalSystem(object):
         self.dpml = dpml
         
         # Define the map size, so that the PML is outside of the working system
+        #N_x = int(np.around(())
+        #N_y = int(np.around())
         epsilon_map = np.ones(((self.size_x + 2*dpml)*res+1, 
                                (self.size_y + 2*dpml)*res+1), dtype = 'float32') 
         
@@ -505,7 +512,7 @@ class OpticalSystem(object):
                   len(self.permittivity_map[:])/self.res,
                   0,
                   len(self.permittivity_map[:][0])/self.res)
-        plt.figure(figsize = (15,15))
+        plt.figure(dpi = 150)
         plt.title('Permittivity map')
         plt.imshow(self.permittivity_map.transpose(), extent = extent)
         plt.savefig('Lenses.png')
@@ -1301,8 +1308,10 @@ class Sim(object):
         
         #Runs sim
         if get_mp4 :
+            f = plt.figure(dpi = 150)
             #Animate object
             animate = mp.Animate2D(self.sim,
+                        f = f,
                        fields=mp.Ez,
                        realtime=True,
                        field_parameters={'alpha':0.8, 
@@ -1452,7 +1461,13 @@ class Sim(object):
             plot_monitors_flag = False)
 
         x_pos = [k - self.OS.size_x/2 for k in range(0, int(self.OS.size_x), 50)]
-        plt.xticks(x_pos, [str(k) for k in range(0, int(self.OS.size_x), 50)] )
+        y_pos = [k - self.OS.size_y/2 for k in range(0, int(self.OS.size_y), 50)]
+        plt.xticks(x_pos, [str(k) for k in range(0, int(self.OS.size_x), 50)], fontsize = 13)
+        plt.yticks(y_pos, [str(k) for k in range(-int(self.OS.size_y/2), 
+                                                int(self.OS.size_y/2), 
+                                                50)], fontsize = 13)
+        plt.xlabel('X [mm]', fontsize = 14)
+        plt.ylabel('Y [mm]', fontsize = 14)
         plt.savefig(name + '.png')
 
     """
@@ -1695,14 +1710,17 @@ class Analysis(object):
             #Gets the complex electric field and adds it to the plot
             E_field = self.sim.get_complex_field(plot_amp = plot_amp,
                                     saveh5 = saveh5, 
-                                    filename = filename[k],
+                                    filename = filename[k] + '_{}'.format(int(k)),
                                     parallel = parallel)
 
             #Updates the list of fields
             self.list_efields[k] = E_field
 
     def beam_FT(self, 
-                zero_pad = 15):
+                zero_pad = 15,
+                savebeam = False,
+                parallel = False,
+                filename = None):
 
         '''
         Gets the Fourier Transforms of the complex electric fields at aperture.
@@ -1734,13 +1752,43 @@ class Analysis(object):
 
             #FFT over the field
             fft = np.fft.fft(self.list_efields[k], 
-                n = zero_pad*len(self.list_efields[k]))
+                    n = zero_pad*len(self.list_efields[k]))
 
             #FFT is normalized by its max
             FFTs[k] = np.abs(fft) 
             FFTs[k] = FFTs[k]/np.max(FFTs[k])
 
+        if savebeam :
+            if parallel :
+                h = h5py.File(filename + '.h5', 'w', 
+                            driver ='mpio', 
+                            comm=MPI.COMM_WORLD)
+            else: 
+                h = h5py.File(filename + '.h5', 'w')
+            h.create_dataset('freq', data=freq, dtype = 'float64')
+            h.create_dataset('beams', data=FFTs, dtype = 'float64')
+            aper = self.sim.OS.aper_size
+            h.create_dataset('aper_size', data = aper, dtype = 'float64')
+            h.close()
         return freq, FFTs
+
+    def open_saved_beams(self, filename, parallel = False):
+
+        name = filename + '.h5'
+        if parallel :
+            data = h5py.File(name, 'r', driver ='mpio', 
+                            comm=MPI.COMM_WORLD)
+        else : 
+            data = h5py.File(name, 'r')
+        aper = data['aper_size']
+        FFTs = data['beams']
+        freq = data['freq']
+
+        beam = np.copy(FFTs)
+        freq_copy = np.copy(freq)
+        self.sim.OS.aper_size = np.copy(aper)
+        return freq_copy, beam
+
 
     def plotting(self, fftfreq, FFTs, wvl,
                 deg_range = 20,
@@ -1784,6 +1832,8 @@ class Analysis(object):
 
         deg = np.arctan(fftfreq*wvl)*180/np.pi
         rads = np.array(deg) * np.pi/180
+
+        colors = ['b', 'g', 'r']
         
 
         plt.figure(figsize = (8,6))
@@ -1793,8 +1843,9 @@ class Analysis(object):
         
         for k in range(len(FFTs)):
 
-            fft_k = FFTs[k] / (np.cos(rads)**2)
-            fft_dB = 10*np.log10(fft_k / np.max(fft_k))
+            fft_k = (FFTs[k] / (np.cos(rads)**2))**2
+            fft_k = fft_k / np.max(fft_k)
+            fft_dB = 10*np.log10(fft_k)
             middle = int(len(fft_k)/2)
 
             #BEAM SOLID ANGLE CALCULATION
@@ -1814,23 +1865,42 @@ class Analysis(object):
                     label = '{}'.format(legend[k]))
 
             if legend is None :
-                plt.plot(deg[:middle], fft_dB[:middle])
 
+                plt.plot(deg[:middle], fft_dB[:middle])
                 #TESTING, ignore this
                 #plt.plot(self.sim.angles, self.sim.ffmeep)
 
             #BEST FIT GAUSSIAN FWHM
             if print_fwhm :
-                popt, psig = sc.curve_fit(gaussian, deg, fft_k)
-                fwhm = popt[1] + 4*popt[0]*np.sqrt(np.log(2))
+
+                #Fit is done around the gaussian portion of the beam
+                maxidx = np.argmax(fft_k)
+                i = 0
+                while fft_k[maxidx + i] > fft_k[maxidx + i + 1] :
+                    i += 1
+
+                xdata = deg[maxidx - i : maxidx + i ]
+                ydata = fft_k[maxidx - i : maxidx + i ]
+                if maxidx - i <= 0:
+                    xdata = np.concatenate((deg[maxidx - i:], deg[:maxidx + i]))
+                    ydata = np.concatenate((fft_k[maxidx - i:], fft_k[:maxidx + i]))
+                p0 = [1,1]
+                if maxidx <=10:
+                    p0 = [1,0]
+                popt, psig = sc.curve_fit(gaussian, xdata, ydata, p0 = p0)
+                fwhm = np.abs(4*popt[0]*np.sqrt(np.log(2)))
                 fwhm_th = wvl/self.sim.OS.aper_size*180/np.pi
                 print('Best fit Gaussian FWHM : {:.2f}deg'.format(2*fwhm))
                 print('Theoretical FWHM : {:.2f}deg'.format(fwhm_th))
-                y = 10*np.log10(gaussian(deg, popt[0], popt[1]))
+                gauss = gaussian(deg[:middle], popt[0], popt[1]) + 1e-10
+                y = 10*np.log10(gauss)
+
+                plt.plot(deg[:middle], y, linestyle = '--', 
+                                        color = 'C{}'.format(int(k)))
 
         plt.ylim((ylim, 0))
         plt.xlabel('Angle [deg]', fontsize = 14)
-        plt.ylabel('Amplitude [dB]', fontsize = 14)
+        plt.ylabel('Power [dB]', fontsize = 14)
         plt.xticks(fontsize = 12)
         plt.yticks(fontsize = 12)
 

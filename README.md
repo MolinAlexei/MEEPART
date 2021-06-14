@@ -13,4 +13,4 @@ MEEPART's main functions in the current state are :
 
 A guide to the code is provided in 2 parts, MEEPART_GUIDE which shows the basic tools of the code and MEEPART_GUIDE_Pt2 which goes into more detail on the possibilities of MEEPART.
 
-The extension of MEEPART to 3D systems is currently in progress.
+Built with MEEP 1.17.

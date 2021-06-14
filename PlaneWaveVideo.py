@@ -42,35 +42,29 @@ image_plane = ImagePlane(name = 'Image Plane',
                          n_refr = 1, 
                          conductivity = 0)
 
-tube = TelescopeTube('Tube')
-absorber = Absorber('Absorber')
-
-
-
-def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
-    opt_sys = OpticalSystem('test')
-    opt_sys.set_size(750,350)
-    opt_sys.add_component(lens1)
-    opt_sys.add_component(lens2)
-    opt_sys.add_component(aperture_stop)
-    opt_sys.add_component(image_plane)
-    opt_sys.add_component(tube)
-    opt_sys.assemble_system(dpml = dpml, resolution = res)
-
-    opt_sys.write_h5file()
-    
-    return opt_sys
+tube = TelescopeTube(name = 'Tube', thick = 10, center = 165)
+absorber = Absorber(name = 'Absorber', thick = 10, center = 155)
 
 #PARAMS
 wvl = 10
 resolution = 1
 dpml = 5
 
+opt_sys = OpticalSystem('test')
+opt_sys.set_size(750,340)
+opt_sys.add_component(lens1)
+opt_sys.add_component(lens2)
+opt_sys.add_component(aperture_stop)
+opt_sys.add_component(image_plane)
+opt_sys.add_component(tube)
+opt_sys.assemble_system(dpml = dpml, resolution = res)
+opt_sys.write_h5file()
 
-FFT_list = []
+
+
 opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, resolution, dpml)
 sim = Sim(opt_sys)
 
-sim.define_source(wavelength = wvl, x = 20, y = 0, size_x = 0, size_y = 300, sourcetype = 'Plane wave', rot_angle = 14)
+sim.define_source(wvl = wvl, x = 20, y = 0, size_x = 0, size_y = 300, sourcetype = 'Plane wave', rot_angle = 14)
 
-sim.run_sim(runtime = 800, dpml = dpml, sim_resolution = resolution, get_mp4 = True, movie_name = 'plane_wave.mp4', Nfps = 24, image_every = 5)
+sim.run_sim(runtime = 800, dpml = dpml, simres = resolution, get_mp4 = True, movie_name = 'plane_wave.mp4', Nfps = 24, image_every = 5)
