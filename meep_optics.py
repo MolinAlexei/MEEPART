@@ -6,9 +6,7 @@ import matplotlib.pyplot as plt
 import scipy.optimize as sc
 from mpi4py import MPI
 import h5py
-import os
-import glob
-import csv
+
 
 
 class OpticalSystem(object):
@@ -1241,7 +1239,8 @@ class Sim(object):
                 simres = 1, 
                 get_mp4 = False, 
                 Nfps = 24, 
-                movie_name = 'movie', 
+                movie_name = 'movie',
+                dpi = 150, 
                 image_every = 5,
                 ff_angle = 45,
                 ff_npts = 500):
@@ -1266,6 +1265,8 @@ class Sim(object):
             Number of fps at which to save the video. (default : 24)
         movie_name : str, optional
             Name of the file of the video. (default : 'movie')
+        dpi : float, optional
+            dpi of the video (default : 150)
         ff_angle : float, optional
             Max angle in degrees at which the 
             far field is retrieved (default : 45)
@@ -1308,20 +1309,28 @@ class Sim(object):
         
         #Runs sim
         if get_mp4 :
-            f = plt.figure(dpi = 150)
+            f = plt.figure(dpi = dpi)
             #Animate object
+            field_func = lambda x: 20*np.log10(np.abs(x))
+
+            def colorbar(ax):
+                matplotlib.colorbar.ColorbarBase(ax=ax)
+                return ax
+
+
             animate = mp.Animate2D(self.sim,
                         f = f,
                        fields=mp.Ez,
                        realtime=True,
                        field_parameters={'alpha':0.8, 
                                         'cmap':'RdBu', 
-                                        'interpolation':'none'},
+                                        'interpolation':'none', 'postprocess' : np.real},
                        boundary_parameters={'hatch':'o', 
                                         'linewidth':1.5, 
                                         'facecolor':'y', 
                                         'edgecolor':'b', 
                                         'alpha':0.3})
+                        #plot_modifiers = [colorbar])
 
             self.sim.run(mp.at_every(image_every, animate), until = runtime)
             animate.to_mp4(Nfps, movie_name + '.mp4')

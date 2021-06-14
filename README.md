@@ -13,4 +13,4 @@ MEEPART's main functions in the current state are :
 
 A guide to the code is provided in 2 parts, MEEPART_GUIDE which shows the basic tools of the code and MEEPART_GUIDE_Pt2 which goes into more detail on the possibilities of MEEPART.
 
-Built with MEEP 1.17.
+Built with MEEP 1.17, h5py 2.10.0, mpi4py 3.0.3, ffmpeg 4.3.1

@@ -3,9 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse as ap
 import h5py
+import mpi4py
 from scipy import optimize
-from mpi4py import MPI
+#from mpi4py import MPI
     
+
+
 coeff = 10 
 
 lens1 = AsphericLens(name = 'Lens 1', 
@@ -57,14 +60,19 @@ opt_sys.add_component(lens2)
 opt_sys.add_component(aperture_stop)
 opt_sys.add_component(image_plane)
 opt_sys.add_component(tube)
-opt_sys.assemble_system(dpml = dpml, resolution = res)
+opt_sys.assemble_system(dpml = dpml, res = resolution)
 opt_sys.write_h5file()
 
 
 
-opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, resolution, dpml)
 sim = Sim(opt_sys)
 
 sim.define_source(wvl = wvl, x = 20, y = 0, size_x = 0, size_y = 300, sourcetype = 'Plane wave', rot_angle = 14)
 
-sim.run_sim(runtime = 800, dpml = dpml, simres = resolution, get_mp4 = True, movie_name = 'plane_wave.mp4', Nfps = 24, image_every = 5)
+sim.run_sim(runtime = 800, 
+    simres = resolution, 
+    get_mp4 = True, 
+    movie_name = 'plane_wave', 
+    Nfps = 24, 
+    image_every = 5,
+    dpi = 150)
