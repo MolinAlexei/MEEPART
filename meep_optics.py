@@ -1311,11 +1311,13 @@ class Sim(object):
         if get_mp4 :
             f = plt.figure(dpi = dpi)
             #Animate object
+            """
             field_func = lambda x: 20*np.log10(np.abs(x))
 
             def colorbar(ax):
                 matplotlib.colorbar.ColorbarBase(ax=ax)
                 return ax
+            """
 
 
             animate = mp.Animate2D(self.sim,
@@ -1324,7 +1326,7 @@ class Sim(object):
                        realtime=True,
                        field_parameters={'alpha':0.8, 
                                         'cmap':'RdBu', 
-                                        'interpolation':'none', 'postprocess' : np.real},
+                                        'interpolation':'none'},
                        boundary_parameters={'hatch':'o', 
                                         'linewidth':1.5, 
                                         'facecolor':'y', 
@@ -1385,7 +1387,7 @@ class Sim(object):
             plt.xlabel("Angle [deg]")
             plt.ylabel("Amplitude [dB]")
             plt.grid(axis='x',linewidth=0.5,linestyle='--')
-            plt.title("f.-f. spectra @  λ = 10 mm")
+            plt.title("f.-f. spectra @  wvl = 10 mm")
             plt.savefig(filename + '.png')
             plt.close()
 
@@ -1796,6 +1798,7 @@ class Analysis(object):
         beam = np.copy(FFTs)
         freq_copy = np.copy(freq)
         self.sim.OS.aper_size = np.copy(aper)
+        data.close()
         return freq_copy, beam
 
 
@@ -1807,7 +1810,8 @@ class Analysis(object):
                 print_solid_angle = False,
                 print_fwhm = False,
                 savefig = False,
-                path_name = 'plots/meep_guide_plot'):
+                path_name = 'plots/meep_guide_plot',
+                seq_col = False):
         '''
         Plots far field beam
 
@@ -1837,12 +1841,14 @@ class Analysis(object):
         path_name : str, optional
             Path and name of the plot to be saved 
             (default : 'plots/meep_guide_plot')
+        seq_col : bool, optional
+            Whether to set a sequential colormap (default : False)
         '''
 
         deg = np.arctan(fftfreq*wvl)*180/np.pi
         rads = np.array(deg) * np.pi/180
 
-        colors = ['b', 'g', 'r']
+        col = plt.cm.jet(np.linspace(0,1,len(FFTs))) 
         
 
         plt.figure(figsize = (8,6))
@@ -1863,19 +1869,20 @@ class Analysis(object):
                 
                 x_span = np.append(rads, 0)
                 integrand = np.append(fft_k, fft_k[0])
+                integrand *= np.sin(x_span)
                 right_part = np.trapz(integrand[:middle], x = x_span[:middle])
-                left_part = np.trapz(integrand[middle:], x = x_span[middle:])
-                solid_angle = right_part + left_part
+                #left_part = np.trapz(integrand[middle:], x = x_span[middle:])
+                solid_angle = right_part #+ left_part
                 print('Beam n.{} solid angle : {:.3e} srads'.format(k, 
                     solid_angle*2*np.pi))
             
             if legend is not None : 
                 plt.plot(deg[:middle], fft_dB[:middle], 
-                    label = '{}'.format(legend[k]))
+                    label = '{}'.format(legend[k]), color = col[k])
 
             if legend is None :
 
-                plt.plot(deg[:middle], fft_dB[:middle])
+                plt.plot(deg[:middle], fft_dB[:middle], color = col[k])
                 #TESTING, ignore this
                 #plt.plot(self.sim.angles, self.sim.ffmeep)
 
@@ -1884,6 +1891,8 @@ class Analysis(object):
 
                 #Fit is done around the gaussian portion of the beam
                 maxidx = np.argmax(fft_k)
+                if maxidx == len(fft_k) - 1:
+                    maxidx = 0
                 i = 0
                 while fft_k[maxidx + i] > fft_k[maxidx + i + 1] :
                     i += 1
@@ -1904,8 +1913,8 @@ class Analysis(object):
                 gauss = gaussian(deg[:middle], popt[0], popt[1]) + 1e-10
                 y = 10*np.log10(gauss)
 
-                plt.plot(deg[:middle], y, linestyle = '--', 
-                                        color = 'C{}'.format(int(k)))
+                plt.plot(deg[:middle], y, linestyle = '--', color = col[k])
+                                        #color = 'C{}'.format(int(k)))
 
         plt.ylim((ylim, 0))
         plt.xlabel('Angle [deg]', fontsize = 14)
