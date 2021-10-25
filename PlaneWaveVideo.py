@@ -3,12 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse as ap
 import h5py
-import mpi4py
 from scipy import optimize
 #from mpi4py import MPI
     
-
-
 coeff = 10 
 
 lens1 = AsphericLens(name = 'Lens 1', 
@@ -45,34 +42,39 @@ image_plane = ImagePlane(name = 'Image Plane',
                          n_refr = 1, 
                          conductivity = 0)
 
-tube = TelescopeTube(name = 'Tube', thick = 10, center = 165)
-absorber = Absorber(name = 'Absorber', thick = 10, center = 155)
+tube = TelescopeTube('Tube', center=0.)
+absorber = Absorber('Absorber', center=0.)
+
+def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml):
+    opt_sys = OpticalSystem('test')
+    opt_sys.set_size(750, 350)
+    #opt_sys.set_size(1500, 700)
+    #opt_sys.set_size(3000, 1500)
+    opt_sys.add_component(lens1)
+    opt_sys.add_component(lens2)
+    opt_sys.add_component(aperture_stop)
+    opt_sys.add_component(image_plane)
+    opt_sys.add_component(tube)
+    opt_sys.assemble_system(dpml = dpml, res = res)
+
+    opt_sys.write_h5file()
+    
+    return opt_sys
 
 #PARAMS
 wvl = 10
-resolution = 1
+resolution = 4
 dpml = 5
 
-opt_sys = OpticalSystem('test')
-opt_sys.set_size(750,340)
-opt_sys.add_component(lens1)
-opt_sys.add_component(lens2)
-opt_sys.add_component(aperture_stop)
-opt_sys.add_component(image_plane)
-opt_sys.add_component(tube)
-opt_sys.assemble_system(dpml = dpml, res = resolution)
-opt_sys.write_h5file()
+print('Testing 123')
 
-
-
+FFT_list = []
+opt_sys = system_assembly(lens1, lens2, aperture_stop, image_plane, resolution, dpml)
 sim = Sim(opt_sys)
 
-sim.define_source(wvl = wvl, x = 20, y = 0, size_x = 0, size_y = 300, sourcetype = 'Plane wave', rot_angle = 14)
+sim.define_source(wvl = wvl, x = 20, y = 0, size_x = 0, size_y = 300,
+    sourcetype = 'Plane wave', rot_angle = 14)
 
-sim.run_sim(runtime = 800, 
-    simres = resolution, 
-    get_mp4 = True, 
-    movie_name = 'plane_wave', 
-    Nfps = 24, 
-    image_every = 5,
-    dpi = 150)
+sim.run_sim(runtime = 800, get_mp4 = True, # dpml=dpml, sim_resolution = resolution
+        movie_name = 'plane_wave.mp4', Nfps = 24, image_every = 5, dpi=300)
+

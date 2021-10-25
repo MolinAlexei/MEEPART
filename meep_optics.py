@@ -7,8 +7,6 @@ import scipy.optimize as sc
 from mpi4py import MPI
 import h5py
 
-
-
 class OpticalSystem(object):
     '''
     This class is used to define the optical system, by creating the dielectric
@@ -165,7 +163,6 @@ class OpticalSystem(object):
             if radial_slope ==0 and axial_slope == 0 :
                 eps_line = comp.eps
 
-
             #Surface error
             err_bin_idx = int(np.around(y_res/res/comp.surf_err_width))
             err_left_pos = int(err_left[err_bin_idx])
@@ -295,17 +292,63 @@ class OpticalSystem(object):
             elif comp.object_type == 'MetallicTube':
 
                 #The telescope tube is 2 blocks :
-                up_part = mp.Block(size=mp.Vector3(self.size_x, comp.thick, 0),
+                # up_part = mp.Block(size=mp.Vector3(self.size_x, comp.thick, 0),
+                #       center=mp.Vector3(0, comp.center, 0),
+                #       material = mp.metal)
+                
+                # down_part = mp.Block(size=mp.Vector3(self.size_x, comp.thick, 0),
+                #       center=mp.Vector3(0, -comp.center, 0),
+                #       material = mp.metal)
+
+
+
+                up_part = mp.Block(size=mp.Vector3(self.size_x/2., comp.thick, 0),
                       center=mp.Vector3(0, comp.center, 0),
                       material = mp.metal)
-                
-                down_part = mp.Block(size=mp.Vector3(self.size_x, comp.thick, 0),
+
+                down_part = mp.Block(size=mp.Vector3(self.size_x/2., comp.thick, 0),
                       center=mp.Vector3(0, -comp.center, 0),
                       material = mp.metal)
+
                 
                 self.geometry.append(up_part)
                 self.geometry.append(down_part)
-                
+
+            elif comp.object_type == 'MetallicTube2':
+
+
+                up_part = mp.Block(size=mp.Vector3(comp.length, 1., 1.),
+                      center=mp.Vector3(0, comp.radius, 0),
+                      material = mp.metal)
+
+                down_part = mp.Block(size=mp.Vector3(comp.length, 1., 1.),
+                      center=mp.Vector3(0, -comp.radius, 0),
+                      material = mp.metal)
+
+
+                self.geometry.append(up_part)
+                self.geometry.append(down_part)
+
+
+            elif comp.object_type == 'ReflectingStop':
+
+                print(comp.name)
+                print(comp.thick)
+                print(comp.r1)
+                print(comp.r2)
+                print(comp.xpos)
+                print(comp.xpos - self.size_x/2.)
+
+                up_part = mp.Block(size=mp.Vector3(comp.thick, comp.r2 - comp.r1, 1.),
+                      center=mp.Vector3(comp.xpos - self.size_x/2., (comp.r1 + comp.r2)/2., 0),
+                      material = mp.metal)
+
+                down_part = mp.Block(size=mp.Vector3(comp.thick, comp.r2 - comp.r1, 1.),
+                      center=mp.Vector3(comp.xpos - self.size_x/2., -(comp.r1 + comp.r2)/2., 0),
+                      material = mp.metal)
+
+                self.geometry.append(up_part)
+                self.geometry.append(down_part)
 
             elif comp.object_type == 'Absorber':
                 #The absorber is 2 blocks :
@@ -319,8 +362,22 @@ class OpticalSystem(object):
                       center=mp.Vector3(0, -comp.center, 0),               
                       material = mp.Medium(epsilon=comp.epsilon_real, 
                                             D_conductivity=comp.conductivity))
-
                 
+                self.geometry.append(up_part)
+                self.geometry.append(down_part)
+
+            elif comp.object_type == 'Absorber2':
+                #The absorber is 2 blocks :
+                up_part = mp.Block(size=mp.Vector3(comp.length, comp.thick, 1.),
+                      center=mp.Vector3(0, comp.radius - comp.thick/2., 0),
+                      material = mp.Medium(epsilon=comp.epsilon_real,
+                                            D_conductivity=comp.conductivity))
+
+                down_part = mp.Block(size=mp.Vector3(comp.length, comp.thick, 1.),
+                      center=mp.Vector3(0, -comp.radius + comp.thick/2., 0),
+                      material = mp.Medium(epsilon=comp.epsilon_real,
+                                            D_conductivity=comp.conductivity))
+
                 self.geometry.append(up_part)
                 self.geometry.append(down_part)
                 
@@ -625,6 +682,67 @@ class TelescopeTube(object):
         else :
             return 'Metallic tube, thickness ' + str(self.thick) 
 
+class TelescopeTube2(object):
+    '''
+    Class defining a telescope tube.
+    '''
+    def __init__(self, length, radius ,name = None):
+        '''
+        Defines the attributes of the telescope tube object
+
+        Arguments
+        ---------
+        name : str, optional
+            Name of object (default : None)
+        thick : float
+            Thickness of the tube walls
+        center : float
+            Center of the tube walls along the y-axis
+            Needs to account for half a thickness
+        '''
+        self.name = name                        #NAME OF OBJECT
+        self.object_type = 'MetallicTube2'      #OBJECT TYPE
+        self.length = length
+        self.radius = radius
+
+    def __str__(self):
+        if self.name is not None :
+            return self.name + ', radius ' + str(self.radius)
+        else :
+            return 'Metallic tube, radius ' + str(self.radius)
+
+class ReflectingStop(object):
+    '''
+    Class defining a telescope tube.
+    '''
+    def __init__(self, xpos, r1, r2, thick=1.0, name = None):
+        '''
+        Defines the attributes of the telescope tube object
+
+        Arguments
+        ---------
+        name : str, optional
+            Name of object (default : None)
+        thick : float
+            Thickness of the tube walls
+        center : float
+            Center of the tube walls along the y-axis
+            Needs to account for half a thickness
+        '''
+        self.name = name                        #NAME OF OBJECT
+        self.object_type = 'ReflectingStop'      #OBJECT TYPE
+
+        self.xpos = xpos
+        self.r1 = r1
+        self.r2 = r2
+        self.thick = thick
+
+    def __str__(self):
+        if self.name is not None :
+            return self.name + ' at {}'.format(self.xpos)
+        else :
+            return 'Reflecting stop at x = {}'.format(self.xpos)
+
 class Absorber(object):
     '''
     Class defining a wall made of absorbing material.
@@ -668,11 +786,48 @@ class Absorber(object):
         self.freq = freq                        
         self.conductivity = epsilon_imag*2*np.pi*freq/epsilon_real
 
+class Absorber2(object):
+    '''
+    Class defining a telescope tube.
+    '''
+    def __init__(self, thick, length, radius, name = None,
+            epsilon_real = 3.5, epsilon_imag = 0.11025, freq = 1/3):
+        '''
+        Defines the attributes of the telescope tube object
+
+        Arguments
+        ---------
+        name : str, optional
+            Name of object (default : None)
+        thick : float
+            Thickness of the tube walls
+        center : float
+            Center of the tube walls along the y-axis
+            Needs to account for half a thickness
+        '''
+        self.name = name                        #NAME OF OBJECT
+        self.object_type = 'Absorber2'      #OBJECT TYPE
+
+        self.thick = thick
+        self.length = length
+        self.radius = radius
+
+        self.epsilon_real = epsilon_real
+        self.epsilon_imag = epsilon_imag
+        self.freq = freq
+        self.conductivity = epsilon_imag*2*np.pi*freq/epsilon_real
+
+    def __str__(self):
+        if self.name is not None :
+            return self.name + ', radius ' + str(self.radius)
+        else :
+            return 'Absorber2, radius ' + str(self.radius)
+
     def __str__(self):
         if self.name is not None :
             return self.name + ', thickness ' + str(self.thick)
         else :
-            return 'Absorber walls, thickness ' + str(self.thick)
+            return 'Absorber2, thickness ' + str(self.thick)
 
 class HalfWavePlate(object):
     '''
@@ -835,7 +990,6 @@ class AsphericLens(object):
         #deform0 = 2*deform[0]-deform[1]
         #deform.insert(0, deform0)
         #self.deform = deform
-
     
     def left_surface(self, y):
         '''
@@ -1195,7 +1349,19 @@ class Sim(object):
                            center=mp.Vector3(x-self.OS.size_x/2, y, 0),
                            size=mp.Vector3(size_x, size_y, 0),
                            amp_func = amp_func)]
-        
+
+        if sourcetype == 'Point source':
+            #self.source = [mp.Source(src=mp.GaussianSource(f),
+            self.source = [mp.Source(mp.ContinuousSource(f, is_integrated=True),
+                            center=mp.Vector3(x-self.OS.size_x/2, y, 0),
+                            component=mp.Ez,
+                            amp_func=amp_func)]
+
+                # mp.ContinuousSource(f, is_integrated=True),
+                #            component=mp.Ez,
+                #            center=mp.Vector3(x-self.OS.size_x/2, y, 0),
+                #            size=mp.Vector3(size_x, size_y, 0),
+                #            amp_func = amp_func)]
 
         elif sourcetype == 'Gaussian beam':
             self.source = [mp.GaussianBeamSource(mp.ContinuousSource(f),
@@ -1233,7 +1399,6 @@ class Sim(object):
         """
         return self.source
     
-    
     def run_sim(self, 
                 runtime, 
                 simres = 1, 
@@ -1242,6 +1407,7 @@ class Sim(object):
                 movie_name = 'movie',
                 dpi = 150, 
                 image_every = 5,
+                linear=True,
                 ff_angle = 45,
                 ff_npts = 500):
         '''
@@ -1280,9 +1446,7 @@ class Sim(object):
         self.ff_distance = 1e8      
         self.ff_angle = ff_angle       
         self.ff_npts = ff_npts        
-        
 
-        
         #Defines the simulation environment, using the various objects defined
         #previously
         self.sim = mp.Simulation(cell_size=self.cell,
@@ -1305,27 +1469,54 @@ class Sim(object):
                             nfreq, 
                             mp.Near2FarRegion(center=n2f_pt, 
                                 size = (0,self.OS.aper_size), weight = -1))     
-
         
         #Runs sim
         if get_mp4 :
             f = plt.figure(dpi = dpi)
+
             #Animate object
-            field_func = lambda x: 20*np.log10(np.abs(x))
+            #field_func = lambda x: 20*np.log10(np.abs(x))
+            #field_func = lambda x: np.abs(x)
+            field_func = lambda x: x
+
+            def field_func2(x):
+                # print(np.min(x.flatten()))
+                # print(np.max(x.flatten()))
+                # print(np.min(20*np.log10(np.abs(x))))
+                # print(np.max(20*np.log10(np.abs(x))))
+
+                #return x
+                # nx, ny = np.shape(x)
+                # xflat = x.flatten()
+                # gdidx = (np.abs(xflat) > 0.)
+                # xout = np.zeros_like(xflat)
+                # xout[gdidx] = 20 * np.log10(np.abs(xout[gdidx]))
+
+                #return np.reshape(xout, nx, ny)
+                #xout[gdidx] = 20 * np.log10(np.abs(x))
+
+                #return xout
+
+                #return 0. if (x == 0.) else 20*np.log10(np.abs(x))
+
+                return 20*np.log10(np.abs(x) + 1e-6)
 
             def colorbar(ax):
                 matplotlib.colorbar.ColorbarBase(ax=ax)
                 return ax
 
-
             animate = mp.Animate2D(self.sim,
                         f = f,
                        fields=mp.Ez,
                        realtime=True,
-                       field_parameters={'alpha':0.8, 
-                                        'cmap':'RdBu', 
-                                        'interpolation':'none', 'postprocess' : np.real},
-                       boundary_parameters={'hatch':'o', 
+                       field_parameters={'alpha':0.8, # If 1.0 you won't see optical components
+                                        'cmap':'magma',
+                                        'vmin':-40,
+                                        'vmax':3,
+                                        'interpolation':'none',
+                                        'post_process':field_func if linear else field_func2}, #'postprocess' : np.real,
+                       eps_parameters={'cmap':'binary', 'alpha':0.8},
+                       boundary_parameters={'hatch':'o',
                                         'linewidth':1.5, 
                                         'facecolor':'y', 
                                         'edgecolor':'b', 
@@ -1367,6 +1558,11 @@ class Sim(object):
             ff_res, 
             center=mp.Vector3(- self.ff_distance,0.5*ff_length), 
             size=mp.Vector3(y=ff_length))
+
+        print('ff shape')
+        print(type(ff))
+        print(ff.keys())
+        print(np.shape(ff))
 
         ff_lengths = np.linspace(0,ff_length,self.ff_npts)
         angles = [np.degrees(np.arctan(f)) for f in ff_lengths/self.ff_distance]
@@ -1536,6 +1732,7 @@ class Sim(object):
         #few periods for wavelengths from 1 to 10
         #Can be tweaked to save on sim time.
         n_iter = 120
+        n_iter = 3
 
         res = self.simres
         AP_size = self.OS.aper_size
@@ -1545,8 +1742,6 @@ class Sim(object):
         efield = self.sim.get_array(center=mp.Vector3(aper_pos_x, 0), 
                                     size=mp.Vector3(0, AP_size), 
                                     component=mp.Ez)
-
-        
 
         #Initializes the list containing the E field evolution
         e_field_evol = np.ones((n_iter, len(efield)))
@@ -1680,7 +1875,7 @@ class Analysis(object):
             filename = [filename]
 
         # Adaptation to specify either in wavelength or frequency :
-        if wvl is not None :
+        if wvl is not None:
            f = [1/wvl[k] for k in range(len(wvl))]
 
         if f is not None:
@@ -1706,6 +1901,7 @@ class Analysis(object):
 
             
             #Runs the sim
+            print('runtime = {}'.format(runtime))
             self.sim.run_sim(runtime, simres = simres, ff_angle = 80, ff_npts = 800)
 
             #self.sim.plot_efield()
@@ -1797,7 +1993,6 @@ class Analysis(object):
         freq_copy = np.copy(freq)
         self.sim.OS.aper_size = np.copy(aper)
         return freq_copy, beam
-
 
     def plotting(self, fftfreq, FFTs, wvl,
                 deg_range = 20,

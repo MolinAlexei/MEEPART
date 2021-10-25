@@ -43,8 +43,6 @@ image_plane = ImagePlane(name = 'Image Plane',
 tube = TelescopeTube('Tube')
 absorber = Absorber('Absorber')
 
-
-
 def system_assembly(lens1, lens2, aperture_stop, image_plane, res, dpml, 
                     bub_radius = 0, bub_nb = 0, r_factor = 0,
                     telescope_tube = False,
@@ -215,7 +213,6 @@ def main():
         for k in range(len(args.bubbles_r)):
             bub_radius = np.float(args.bubbles_r[0])
             for i in range(len(args.bubbles_nb)):
-
             
                 bub_nb = int(args.bubbles_nb[i])
             
@@ -405,10 +402,6 @@ def main():
             middle = int((len(fft[k])+1)/2)
 
             fft_k = fft[k]
-
-            
-
-            
 
             fft_dB = 10*np.log10(np.abs(fft[k]))
             if len(fft) >1 :
